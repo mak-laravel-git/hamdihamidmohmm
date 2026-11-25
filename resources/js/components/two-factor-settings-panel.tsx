@@ -1,14 +1,15 @@
-import { Form } from '@inertiajs/react';
+import { router } from '@inertiajs/react';
 import { ShieldBan, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
+import AlertError from '@/components/alert-error';
+import ConfirmPasswordModal from '@/components/confirm-password-modal';
 import TwoFactorRecoveryCodes from '@/components/two-factor-recovery-codes';
 import TwoFactorSetupModal from '@/components/two-factor-setup-modal';
 import { Button } from '@/components/ui/button';
 import { useLocale } from '@/hooks/use-locale';
 import { useTwoFactorAuth } from '@/hooks/use-two-factor-auth';
 import { cn } from '@/lib/utils';
-import { disable, enable } from '@/routes/two-factor';
 
 type TwoFactorSettingsPanelProps = {
     twoFactorEnabled?: boolean;
@@ -22,6 +23,25 @@ export default function TwoFactorSettingsPanel({
     className,
 }: TwoFactorSettingsPanelProps) {
     const { t } = useLocale();
+    const [showSetupModal, setShowSetupModal] = useState(false);
+    const [confirmPasswordOpen, setConfirmPasswordOpen] = useState(false);
+    const [processing, setProcessing] = useState(false);
+    const confirmPasswordResolver = useRef<
+        ((confirmed: boolean) => void) | null
+    >(null);
+
+    const requestPasswordConfirmation = useCallback((): Promise<boolean> => {
+        return new Promise<boolean>((resolve) => {
+            confirmPasswordResolver.current = resolve;
+            setConfirmPasswordOpen(true);
+        });
+    }, []);
+
+    const resolvePasswordConfirmation = useCallback((confirmed: boolean) => {
+        confirmPasswordResolver.current?.(confirmed);
+        confirmPasswordResolver.current = null;
+    }, []);
+
     const {
         qrCodeSvg,
         hasSetupData,
@@ -30,9 +50,31 @@ export default function TwoFactorSettingsPanel({
         fetchSetupData,
         recoveryCodesList,
         fetchRecoveryCodes,
+        enableTwoFactor,
+        disableTwoFactor,
+        regenerateCodes,
         errors,
-    } = useTwoFactorAuth();
-    const [showSetupModal, setShowSetupModal] = useState(false);
+    } = useTwoFactorAuth(requestPasswordConfirmation);
+
+    const handleEnable = useCallback(async () => {
+        setProcessing(true);
+        const enabled = await enableTwoFactor();
+        setProcessing(false);
+
+        if (enabled) {
+            setShowSetupModal(true);
+        }
+    }, [enableTwoFactor]);
+
+    const handleDisable = useCallback(async () => {
+        setProcessing(true);
+        const disabled = await disableTwoFactor();
+        setProcessing(false);
+
+        if (disabled) {
+            router.reload({ preserveScroll: true });
+        }
+    }, [disableTwoFactor]);
 
     return (
         <div className={cn('space-y-4', className)}>
@@ -44,6 +86,8 @@ export default function TwoFactorSettingsPanel({
                     {t('settings.two_factor.description')}
                 </p>
             </div>
+
+            {errors.length > 0 ? <AlertError errors={errors} /> : null}
 
             {twoFactorEnabled ? (
                 <div className="flex flex-col items-start gap-4">
@@ -57,21 +101,18 @@ export default function TwoFactorSettingsPanel({
                     <TwoFactorRecoveryCodes
                         recoveryCodesList={recoveryCodesList}
                         fetchRecoveryCodes={fetchRecoveryCodes}
-                        errors={errors}
+                        regenerateCodes={regenerateCodes}
                     />
 
-                    <Form {...disable.form()}>
-                        {({ processing }) => (
-                            <Button
-                                variant="destructive"
-                                type="submit"
-                                disabled={processing}
-                                className="rounded-xl"
-                            >
-                                <ShieldBan /> {t('settings.two_factor.disable')}
-                            </Button>
-                        )}
-                    </Form>
+                    <Button
+                        variant="destructive"
+                        type="button"
+                        disabled={processing}
+                        className="rounded-xl"
+                        onClick={handleDisable}
+                    >
+                        <ShieldBan /> {t('settings.two_factor.disable')}
+                    </Button>
                 </div>
             ) : (
                 <div className="flex flex-col items-start gap-4">
@@ -84,6 +125,7 @@ export default function TwoFactorSettingsPanel({
 
                     {hasSetupData ? (
                         <Button
+                            type="button"
                             onClick={() => setShowSetupModal(true)}
                             className="rounded-xl bg-[#0057c8] text-white hover:bg-[#0046a3]"
                         >
@@ -91,21 +133,15 @@ export default function TwoFactorSettingsPanel({
                             {t('settings.two_factor.continue_setup')}
                         </Button>
                     ) : (
-                        <Form
-                            {...enable.form()}
-                            onSuccess={() => setShowSetupModal(true)}
+                        <Button
+                            type="button"
+                            disabled={processing}
+                            onClick={handleEnable}
+                            className="rounded-xl bg-[#0057c8] text-white hover:bg-[#0046a3]"
                         >
-                            {({ processing }) => (
-                                <Button
-                                    type="submit"
-                                    disabled={processing}
-                                    className="rounded-xl bg-[#0057c8] text-white hover:bg-[#0046a3]"
-                                >
-                                    <ShieldCheck />
-                                    {t('settings.two_factor.enable')}
-                                </Button>
-                            )}
-                        </Form>
+                            <ShieldCheck />
+                            {t('settings.two_factor.enable')}
+                        </Button>
                     )}
                 </div>
             )}
@@ -120,6 +156,13 @@ export default function TwoFactorSettingsPanel({
                 clearSetupData={clearSetupData}
                 fetchSetupData={fetchSetupData}
                 errors={errors}
+            />
+
+            <ConfirmPasswordModal
+                open={confirmPasswordOpen}
+                onOpenChange={setConfirmPasswordOpen}
+                onConfirmed={() => resolvePasswordConfirmation(true)}
+                onCancelled={() => resolvePasswordConfirmation(false)}
             />
         </div>
     );

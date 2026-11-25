@@ -1,6 +1,5 @@
-import { Form } from '@inertiajs/react';
 import { Eye, EyeOff, LockKeyhole, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -11,48 +10,57 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 import { useLocale } from '@/hooks/use-locale';
-import { regenerateRecoveryCodes } from '@/routes/two-factor';
-
-import AlertError from './alert-error';
 
 interface TwoFactorRecoveryCodesProps {
     recoveryCodesList: string[];
-    fetchRecoveryCodes: () => Promise<void>;
-    errors: string[];
+    fetchRecoveryCodes: () => Promise<boolean>;
+    regenerateCodes: () => Promise<boolean>;
 }
 
 export default function TwoFactorRecoveryCodes({
     recoveryCodesList,
     fetchRecoveryCodes,
-    errors,
+    regenerateCodes,
 }: TwoFactorRecoveryCodesProps) {
     const { t } = useLocale();
     const [codesAreVisible, setCodesAreVisible] = useState<boolean>(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isRegenerating, setIsRegenerating] = useState(false);
     const codesSectionRef = useRef<HTMLDivElement | null>(null);
     const canRegenerateCodes = recoveryCodesList.length > 0 && codesAreVisible;
 
     const toggleCodesVisibility = useCallback(async () => {
-        if (!codesAreVisible && !recoveryCodesList.length) {
-            await fetchRecoveryCodes();
+        if (codesAreVisible) {
+            setCodesAreVisible(false);
+
+            return;
         }
 
-        setCodesAreVisible(!codesAreVisible);
+        if (!recoveryCodesList.length) {
+            setIsLoading(true);
+            const loaded = await fetchRecoveryCodes();
+            setIsLoading(false);
 
-        if (!codesAreVisible) {
-            setTimeout(() => {
-                codesSectionRef.current?.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'nearest',
-                });
+            if (!loaded) {
+                return;
+            }
+        }
+
+        setCodesAreVisible(true);
+
+        setTimeout(() => {
+            codesSectionRef.current?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'nearest',
             });
-        }
+        });
     }, [codesAreVisible, recoveryCodesList.length, fetchRecoveryCodes]);
 
-    useEffect(() => {
-        if (!recoveryCodesList.length) {
-            fetchRecoveryCodes();
-        }
-    }, [recoveryCodesList.length, fetchRecoveryCodes]);
+    const handleRegenerate = useCallback(async () => {
+        setIsRegenerating(true);
+        await regenerateCodes();
+        setIsRegenerating(false);
+    }, [regenerateCodes]);
 
     const RecoveryCodeIconComponent = codesAreVisible ? EyeOff : Eye;
 
@@ -72,6 +80,7 @@ export default function TwoFactorRecoveryCodes({
                     <Button
                         onClick={toggleCodesVisibility}
                         className="w-fit"
+                        disabled={isLoading}
                         aria-expanded={codesAreVisible}
                         aria-controls="recovery-codes-section"
                     >
@@ -85,23 +94,16 @@ export default function TwoFactorRecoveryCodes({
                     </Button>
 
                     {canRegenerateCodes && (
-                        <Form
-                            {...regenerateRecoveryCodes.form()}
-                            options={{ preserveScroll: true }}
-                            onSuccess={fetchRecoveryCodes}
+                        <Button
+                            variant="secondary"
+                            type="button"
+                            disabled={isRegenerating}
+                            onClick={handleRegenerate}
+                            aria-describedby="regenerate-warning"
                         >
-                            {({ processing }) => (
-                                <Button
-                                    variant="secondary"
-                                    type="submit"
-                                    disabled={processing}
-                                    aria-describedby="regenerate-warning"
-                                >
-                                    <RefreshCw />{' '}
-                                    {t('settings.two_factor.regenerate_codes')}
-                                </Button>
-                            )}
-                        </Form>
+                            <RefreshCw />{' '}
+                            {t('settings.two_factor.regenerate_codes')}
+                        </Button>
                     )}
                 </div>
                 <div
@@ -110,63 +112,54 @@ export default function TwoFactorRecoveryCodes({
                     aria-hidden={!codesAreVisible}
                 >
                     <div className="mt-3 space-y-3">
-                        {errors?.length ? (
-                            <AlertError errors={errors} />
-                        ) : (
-                            <>
+                        <div
+                            ref={codesSectionRef}
+                            className="grid gap-1 rounded-lg bg-muted p-4 font-mono text-sm"
+                            role="list"
+                            aria-label={t(
+                                'settings.two_factor.recovery_codes_aria',
+                            )}
+                        >
+                            {recoveryCodesList.length ? (
+                                recoveryCodesList.map((code, index) => (
+                                    <div
+                                        key={index}
+                                        role="listitem"
+                                        className="select-text"
+                                    >
+                                        {code}
+                                    </div>
+                                ))
+                            ) : (
                                 <div
-                                    ref={codesSectionRef}
-                                    className="grid gap-1 rounded-lg bg-muted p-4 font-mono text-sm"
-                                    role="list"
+                                    className="space-y-2"
                                     aria-label={t(
-                                        'settings.two_factor.recovery_codes_aria',
+                                        'settings.two_factor.loading_recovery_codes',
                                     )}
                                 >
-                                    {recoveryCodesList.length ? (
-                                        recoveryCodesList.map((code, index) => (
-                                            <div
-                                                key={index}
-                                                role="listitem"
-                                                className="select-text"
-                                            >
-                                                {code}
-                                            </div>
-                                        ))
-                                    ) : (
+                                    {Array.from({ length: 8 }, (_, index) => (
                                         <div
-                                            className="space-y-2"
-                                            aria-label={t(
-                                                'settings.two_factor.loading_recovery_codes',
-                                            )}
-                                        >
-                                            {Array.from(
-                                                { length: 8 },
-                                                (_, index) => (
-                                                    <div
-                                                        key={index}
-                                                        className="h-4 animate-pulse rounded bg-muted-foreground/20"
-                                                        aria-hidden="true"
-                                                    />
-                                                ),
-                                            )}
-                                        </div>
-                                    )}
+                                            key={index}
+                                            className="h-4 animate-pulse rounded bg-muted-foreground/20"
+                                            aria-hidden="true"
+                                        />
+                                    ))}
                                 </div>
+                            )}
+                        </div>
 
-                                <div className="text-xs text-muted-foreground select-none">
-                                    <p id="regenerate-warning">
-                                        {t(
-                                            'settings.two_factor.recovery_codes_warning',
-                                            {
-                                                action: t(
-                                                    'settings.two_factor.regenerate_codes',
-                                                ),
-                                            },
-                                        )}
-                                    </p>
-                                </div>
-                            </>
-                        )}
+                        <div className="text-xs text-muted-foreground select-none">
+                            <p id="regenerate-warning">
+                                {t(
+                                    'settings.two_factor.recovery_codes_warning',
+                                    {
+                                        action: t(
+                                            'settings.two_factor.regenerate_codes',
+                                        ),
+                                    },
+                                )}
+                            </p>
+                        </div>
                     </div>
                 </div>
             </CardContent>
