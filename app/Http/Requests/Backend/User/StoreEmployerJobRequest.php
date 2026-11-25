@@ -1,0 +1,141 @@
+<?php
+
+namespace App\Http\Requests\Backend\User;
+
+use App\Enums\JobTaxonomyType;
+use App\Support\ExternalApplyDestination;
+use App\Support\JobApplicationQuestions;
+use App\Support\SafeHtml;
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+class StoreEmployerJobRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return $this->user()?->isEmployer() === true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $skills = $this->input('skills');
+
+        if (is_string($skills)) {
+            $this->merge([
+                'skills' => collect(explode(',', $skills))
+                    ->map(fn (string $skill): string => trim($skill))
+                    ->filter()
+                    ->values()
+                    ->all(),
+            ]);
+        }
+
+        $this->merge([
+            'publish' => $this->boolean('publish', true),
+            'description' => SafeHtml::clean($this->input('description')),
+            'requirements' => SafeHtml::clean($this->input('requirements')),
+            'country' => $this->nullableSlug('country'),
+            'location' => $this->nullableSlug('location'),
+            'category' => $this->nullableSlug('category'),
+            'employment_type' => trim((string) $this->input('employment_type')),
+            'experience_level' => trim((string) $this->input('experience_level')),
+            'career_portal_url' => ExternalApplyDestination::prepare($this->input('career_portal_url')),
+            'apply_by_link' => $this->boolean('apply_by_link'),
+            'hide_on_site_apply' => $this->boolean('hide_on_site_apply'),
+            'application_questions' => JobApplicationQuestions::normalize($this->input('application_questions')),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function rules(): array
+    {
+        return [
+            'title' => ['required', 'string', 'max:255'],
+            'subtitle' => ['nullable', 'string', 'max:255'],
+            'country' => [
+                'nullable',
+                'string',
+                'max:100',
+                Rule::exists('job_taxonomies', 'slug')->where(
+                    fn ($query) => $query->where('type', JobTaxonomyType::Country->value)->where('is_active', true)
+                ),
+            ],
+            'category' => [
+                'required',
+                'string',
+                'max:100',
+                Rule::exists('job_taxonomies', 'slug')->where(
+                    fn ($query) => $query->where('type', JobTaxonomyType::PositionArea->value)->where('is_active', true)
+                ),
+            ],
+            'location' => [
+                'required',
+                'string',
+                'max:100',
+                Rule::exists('job_taxonomies', 'slug')->where(
+                    fn ($query) => $query->where('type', JobTaxonomyType::DutyStation->value)->where('is_active', true)
+                ),
+            ],
+            'employment_type' => [
+                'required',
+                'string',
+                'max:100',
+                Rule::exists('job_taxonomies', 'slug')->where(
+                    fn ($query) => $query->where('type', JobTaxonomyType::EmploymentType->value)->where('is_active', true)
+                ),
+            ],
+            'experience_level' => [
+                'required',
+                'string',
+                'max:100',
+                Rule::exists('job_taxonomies', 'slug')->where(
+                    fn ($query) => $query->where('type', JobTaxonomyType::ExperienceLevel->value)->where('is_active', true)
+                ),
+            ],
+            'salary_range' => ['nullable', 'string', 'max:255'],
+            'career_portal_url' => ExternalApplyDestination::rules($this->boolean('apply_by_link')),
+            'apply_by_link' => ['sometimes', 'boolean'],
+            'hide_on_site_apply' => ['sometimes', 'boolean'],
+            'description' => ['nullable', 'string', 'max:20000'],
+            'requirements' => ['nullable', 'string', 'max:20000'],
+            'skills' => ['nullable', 'array'],
+            'skills.*' => ['string', 'max:80'],
+            ...JobApplicationQuestions::validationRules(),
+            'logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'expires_at' => ['nullable', 'date'],
+            'publish' => ['sometimes', 'boolean'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'title.required' => 'Please enter a job title.',
+            'category.required' => 'Please choose a position area.',
+            'category.exists' => 'Please choose a valid position area.',
+            'location.required' => 'Please choose a duty station.',
+            'location.exists' => 'Please choose a valid duty station.',
+            'employment_type.required' => 'Please choose a job type.',
+            'employment_type.exists' => 'Please choose a valid job type.',
+            'experience_level.required' => 'Please choose an experience level.',
+            'experience_level.exists' => 'Please choose a valid experience level.',
+            'country.exists' => 'Please choose a valid country.',
+            'logo.image' => 'The job logo must be an image.',
+            'logo.mimes' => 'The job logo must be a JPG, PNG, or WEBP file.',
+            'logo.max' => 'The job logo may not be greater than 5MB.',
+            ...ExternalApplyDestination::messages(),
+        ];
+    }
+
+    private function nullableSlug(string $key): ?string
+    {
+        $value = trim((string) $this->input($key));
+
+        return $value !== '' ? $value : null;
+    }
+}

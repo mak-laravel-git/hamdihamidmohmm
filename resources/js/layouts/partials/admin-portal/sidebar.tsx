@@ -1,0 +1,314 @@
+import { Link, router, usePage } from '@inertiajs/react';
+import { ChevronLeft } from 'lucide-react';
+
+import { AdminIcon } from '@/components/admin-icon';
+import { useLocale } from '@/hooks/use-locale';
+import { cn } from '@/lib/utils';
+import { jobs } from '@/routes';
+import type { SharedData } from '@/types';
+
+type NavBadgeKey =
+    | 'employers'
+    | 'verifications'
+    | 'jobs'
+    | 'payments'
+    | 'notifications'
+    | 'contact_messages';
+
+type NavItem = {
+    titleKey: string;
+    href: string | null;
+    icon: string;
+    match?: string;
+    superAdminOnly?: boolean;
+    badgeKey?: NavBadgeKey;
+};
+
+const navItems: NavItem[] = [
+    {
+        titleKey: 'admin.nav.dashboard',
+        href: '/admin/dashboard',
+        icon: '/images/admin/nav-dashboard.svg',
+        match: '/admin/dashboard',
+    },
+    {
+        titleKey: 'admin.nav.users',
+        href: '/admin/users',
+        icon: '/images/admin/nav-job-seekers.svg',
+        match: '/admin/users',
+    },
+    {
+        titleKey: 'admin.nav.roles',
+        href: '/admin/roles-permissions',
+        icon: '/images/admin/nav-verification.svg',
+        match: '/admin/roles-permissions',
+    },
+    {
+        titleKey: 'admin.nav.employers',
+        href: '/admin/employers',
+        icon: '/images/admin/nav-employers.svg',
+        match: '/admin/employers',
+        badgeKey: 'employers',
+    },
+    {
+        titleKey: 'admin.nav.job_seekers',
+        href: '/admin/job-seekers',
+        icon: '/images/admin/nav-job-seekers.svg',
+        match: '/admin/job-seekers',
+    },
+    {
+        titleKey: 'admin.nav.jobs',
+        href: '/admin/jobs',
+        icon: '/images/admin/nav-jobs.svg',
+        match: '/admin/jobs',
+        badgeKey: 'jobs',
+    },
+    {
+        titleKey: 'admin.nav.job_filters',
+        href: '/admin/job-filters',
+        icon: '/images/admin/nav-content.svg',
+        match: '/admin/job-filters',
+    },
+    {
+        titleKey: 'admin.nav.applications',
+        href: '/admin/applications',
+        icon: '/images/admin/nav-applications.svg',
+        match: '/admin/applications',
+    },
+    {
+        titleKey: 'admin.nav.packages',
+        href: '/admin/packages',
+        icon: '/images/admin/nav-packages.svg',
+        match: '/admin/packages',
+    },
+    {
+        titleKey: 'admin.nav.payments',
+        href: '/admin/payments',
+        icon: '/images/admin/nav-payments.svg',
+        match: '/admin/payments',
+        badgeKey: 'payments',
+    },
+    {
+        titleKey: 'admin.nav.verifications',
+        href: '/admin/verifications',
+        icon: '/images/admin/nav-verification.svg',
+        match: '/admin/verifications',
+        badgeKey: 'verifications',
+    },
+    {
+        titleKey: 'admin.nav.reports',
+        href: '/admin/reports',
+        icon: '/images/admin/nav-reports.svg',
+        match: '/admin/reports',
+    },
+    {
+        titleKey: 'admin.nav.content',
+        href: '/admin/content',
+        icon: '/images/admin/nav-content.svg',
+        match: '/admin/content',
+    },
+    {
+        titleKey: 'admin.nav.training',
+        href: '/admin/training',
+        icon: '/images/admin/nav-content.svg',
+        match: '/admin/training',
+    },
+    {
+        titleKey: 'admin.nav.notifications',
+        href: '/admin/notifications',
+        icon: '/images/admin/nav-notifications.svg',
+        match: '/admin/notifications',
+        badgeKey: 'notifications',
+    },
+    {
+        titleKey: 'admin.nav.contact_messages',
+        href: '/admin/contact-messages',
+        icon: '/images/admin/nav-notifications.svg',
+        match: '/admin/contact-messages',
+        badgeKey: 'contact_messages',
+    },
+    {
+        titleKey: 'admin.nav.ai_assistant',
+        href: '/admin/ai-assistant',
+        icon: '/images/admin/nav-reports.svg',
+        match: '/admin/ai-assistant',
+    },
+    {
+        titleKey: 'admin.nav.settings',
+        href: '/admin/settings',
+        icon: '/images/admin/nav-settings.svg',
+        match: '/admin/settings',
+    },
+    {
+        titleKey: 'admin.nav.admins',
+        href: '/admin/admins',
+        icon: '/images/admin/nav-admins.svg',
+        match: '/admin/admins',
+        superAdminOnly: true,
+    },
+];
+
+const formatBadge = (count: number): string =>
+    count > 99 ? '99+' : String(count);
+
+export function AdminPortalSidebar({
+    className,
+    collapsed = false,
+    onToggle,
+    onNavigate,
+}: {
+    className?: string;
+    collapsed?: boolean;
+    onToggle?: () => void;
+    onNavigate?: () => void;
+}) {
+    const page = usePage<SharedData>();
+    const { auth, admin_nav_badges: badges } = page.props;
+    const currentUrl = page.url;
+    const { t } = useLocale();
+
+    return (
+        <aside
+            className={cn(
+                'relative flex h-full shrink-0 flex-col border-r border-[rgba(57,119,166,0.2)] bg-white transition-[width] duration-300 ease-in-out',
+                collapsed ? 'w-[72px]' : 'w-[240px]',
+                className,
+            )}
+        >
+            <div
+                className={cn(
+                    'flex h-[60px] shrink-0 items-center border-b border-[rgba(57,119,166,0.2)]',
+                    collapsed ? 'justify-center px-2' : 'gap-3 px-4',
+                )}
+            >
+                <Link
+                    href={jobs()}
+                    onClick={onNavigate}
+                    className={cn(
+                        'flex min-w-0 items-center transition-opacity hover:opacity-80',
+                        collapsed ? 'justify-center' : 'gap-3',
+                    )}
+                    aria-label={t('nav.jobs')}
+                >
+                    <img
+                        src="/images/admin/logo.png"
+                        alt={t('admin.brand')}
+                        className={cn(
+                            'shrink-0 object-contain',
+                            collapsed
+                                ? 'h-9 w-9 max-w-full'
+                                : 'h-[51px] w-[76px]',
+                        )}
+                        width={collapsed ? 36 : 76}
+                        height={collapsed ? 36 : 51}
+                    />
+                    {!collapsed ? (
+                        <div className="min-w-0">
+                            <p className="truncate text-sm font-bold text-[#050315]">
+                                {t('admin.brand')}
+                            </p>
+                            <p className="truncate text-xs font-normal text-[#3977a6]">
+                                {t('admin.portal')}
+                            </p>
+                        </div>
+                    ) : null}
+                </Link>
+            </div>
+
+            <nav className="flex-1 space-y-0 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-3">
+                {navItems
+                    .filter(
+                        (item) =>
+                            !item.superAdminOnly || auth.user.can_manage_admins,
+                    )
+                    .map((item) => {
+                        const active = item.match
+                            ? currentUrl.startsWith(item.match)
+                            : false;
+                        const title = t(item.titleKey);
+                        const badgeCount = item.badgeKey
+                            ? Number(badges?.[item.badgeKey] ?? 0)
+                            : 0;
+
+                        return (
+                            <Link
+                                key={item.titleKey}
+                                href={item.href!}
+                                onClick={onNavigate}
+                                title={title}
+                                aria-label={title}
+                                className={cn(
+                                    'relative flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium tracking-[-0.16px] transition-colors',
+                                    active
+                                        ? 'bg-[rgba(0,87,200,0.1)] text-[#0057c8]'
+                                        : 'text-[#3977a6] hover:bg-[rgba(0,87,200,0.06)]',
+                                    collapsed && 'justify-center px-2',
+                                )}
+                            >
+                                <AdminIcon
+                                    src={item.icon}
+                                    size={16}
+                                    tint
+                                    className={cn(!active && 'opacity-60')}
+                                />
+                                {!collapsed ? (
+                                    <>
+                                        <span className="min-w-0 flex-1 truncate">
+                                            {title}
+                                        </span>
+                                        {badgeCount > 0 ? (
+                                            <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[#ef4444] px-1.5 text-[10px] font-bold text-white">
+                                                {formatBadge(badgeCount)}
+                                            </span>
+                                        ) : null}
+                                    </>
+                                ) : badgeCount > 0 ? (
+                                    <span className="absolute end-1.5 top-1.5 size-1.5 rounded-full bg-[#ef4444]" />
+                                ) : null}
+                            </Link>
+                        );
+                    })}
+            </nav>
+
+            <div className="shrink-0 border-t border-[rgba(57,119,166,0.2)] px-2 py-3">
+                <button
+                    type="button"
+                    onClick={() => router.post('/logout')}
+                    title={t('admin.nav.logout')}
+                    aria-label={t('admin.nav.logout')}
+                    className={cn(
+                        'flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-[13px] font-medium text-[#3977a6] transition-colors hover:bg-[rgba(0,87,200,0.06)]',
+                        collapsed && 'justify-center px-2',
+                    )}
+                >
+                    <AdminIcon
+                        src="/images/admin/nav-logout.svg"
+                        size={16}
+                        tint
+                    />
+                    {!collapsed ? t('admin.nav.logout') : null}
+                </button>
+            </div>
+
+            {onToggle ? (
+                <button
+                    type="button"
+                    onClick={onToggle}
+                    className="absolute top-[4.75rem] right-0 z-50 hidden size-7 translate-x-1/2 items-center justify-center rounded-full border-2 border-white bg-[#0057c8] text-white shadow-[0_2px_8px_rgba(5,3,21,0.18)] transition-transform duration-300 ease-in-out hover:bg-[#0046a3] md:flex"
+                    aria-label={
+                        collapsed
+                            ? t('common.expand_sidebar')
+                            : t('common.collapse_sidebar')
+                    }
+                >
+                    <ChevronLeft
+                        className={cn(
+                            'size-3.5 transition-transform duration-300 ease-in-out',
+                            collapsed && 'rotate-180',
+                        )}
+                    />
+                </button>
+            ) : null}
+        </aside>
+    );
+}

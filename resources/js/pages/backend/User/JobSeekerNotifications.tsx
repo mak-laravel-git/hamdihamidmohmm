@@ -1,0 +1,120 @@
+import { Head, router, usePage } from '@inertiajs/react';
+
+import {
+    PortalPagination,
+    type PortalPaginator,
+} from '@/components/portal-pagination';
+import { useLocale } from '@/hooks/use-locale';
+import JobSeekerLayout from '@/layouts/job-seeker-layout';
+import { cn } from '@/lib/utils';
+import type { SharedData } from '@/types';
+
+type NotificationRow = {
+    id: string;
+    title: string;
+    message: string;
+    category: string;
+    read: boolean;
+    created_at: string | null;
+};
+
+export default function JobSeekerNotifications({
+    notifications: notificationsPage,
+    unread,
+}: {
+    notifications: PortalPaginator<NotificationRow>;
+    unread: number;
+}) {
+    const { flash } = usePage<SharedData>().props;
+    const { t } = useLocale();
+    const notifications = notificationsPage.data;
+
+    return (
+        <JobSeekerLayout
+            title={t('job_seeker.notifications.title')}
+            unreadCount={unread}
+        >
+            <Head title={t('job_seeker.notifications.title')} />
+
+            <div className="space-y-5 p-6">
+                <div className="flex items-center justify-between">
+                    <h1 className="text-2xl font-extrabold text-[#0057c8]">
+                        {t('job_seeker.notifications.title')}
+                    </h1>
+                    {unread > 0 && (
+                        <button
+                            type="button"
+                            className="text-sm font-semibold text-[#0057c8]"
+                            onClick={() =>
+                                router.post(
+                                    '/job-seeker/notifications/read-all',
+                                )
+                            }
+                        >
+                            {t('job_seeker.notifications.mark_all')}
+                        </button>
+                    )}
+                </div>
+                {flash.success && (
+                    <div className="rounded-xl border border-[#bbf7d0] bg-[#f0fdf4] px-4 py-3 text-sm text-[#15803d]">
+                        {typeof flash.success === 'string'
+                            ? flash.success
+                            : t('common.saved')}
+                    </div>
+                )}
+                <div className="space-y-3">
+                    {notifications.map((item) => (
+                        <button
+                            key={item.id}
+                            type="button"
+                            className={cn(
+                                'w-full rounded-2xl border border-[#e2e8f0] bg-white p-4 text-left shadow-[0px_1px_3px_rgba(0,0,0,0.06)]',
+                                !item.read && 'ring-1 ring-[#bfdbfe]',
+                            )}
+                            onClick={() => {
+                                if (!item.read) {
+                                    router.post(
+                                        `/job-seeker/notifications/${item.id}/read`,
+                                    );
+                                }
+                            }}
+                        >
+                            <div className="flex items-start gap-2">
+                                {!item.read ? (
+                                    <span className="mt-1.5 size-2 shrink-0 rounded-full bg-[#0057c8]" />
+                                ) : null}
+                                <div className="min-w-0 flex-1">
+                                    <p className="font-semibold text-[#050315]">
+                                        {item.title}
+                                    </p>
+                                    <p className="text-sm text-[#64748b]">
+                                        {item.message}
+                                    </p>
+                                    <p className="mt-1 text-xs text-[#99a1af]">
+                                        {item.category} · {item.created_at}
+                                    </p>
+                                </div>
+                            </div>
+                        </button>
+                    ))}
+                    {notifications.length === 0 && (
+                        <div className="rounded-2xl border border-dashed border-[#e2e8f0] bg-white px-6 py-10 text-center shadow-[0px_1px_3px_rgba(0,0,0,0.06)]">
+                            <p className="text-sm text-[#99a1af]">
+                                {t('job_seeker.notifications.empty')}
+                            </p>
+                        </div>
+                    )}
+                </div>
+                <PortalPagination
+                    align="start"
+                    showingLabel={t('common.showing_range', {
+                        from: notificationsPage.from ?? 0,
+                        to: notificationsPage.to ?? 0,
+                        total: notificationsPage.total,
+                    })}
+                    links={notificationsPage.links}
+                />
+            </div>
+        </JobSeekerLayout>
+    );
+}

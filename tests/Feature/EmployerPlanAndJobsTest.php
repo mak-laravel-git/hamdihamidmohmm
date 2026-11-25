@@ -1,0 +1,717 @@
+<?php
+
+use App\Enums\EmployerPackage;
+use App\Enums\JobPostStatus;
+use App\Enums\JobTaxonomyType;
+use App\Enums\PaymentStatus;
+use App\Enums\SubscriptionStatus;
+use App\Models\JobApplication;
+use App\Models\JobPost;
+use App\Models\JobTaxonomy;
+use App\Models\Package;
+use App\Models\Payment;
+use App\Models\User;
+use Database\Seeders\JobTaxonomySeeder;
+
+beforeEach(function () {
+    $this->seed(JobTaxonomySeeder::class);
+});
+
+test('employer dashboard includes the live plan snapshot', function () {
+    $employer = User::factory()->employer()->create();
+    Package::factory()->create([
+        'slug' => EmployerPackage::Professional->value,
+        'job_credits' => 1,
+        'featured_credits' => 0,
+        'is_public' => true,
+        'is_active' => true,
+    ]);
+    JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'status' => JobPostStatus::Active,
+    ]);
+
+    $this->actingAs($employer)
+        ->get(route('employer.dashboard'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('backend/User/EmployerDashboard')
+            ->where('plan.slug', EmployerPackage::Professional->value)
+            ->where('plan.jobs_posted', 1)
+            ->where('plan.credits_remaining', 0)
+            ->has('stats'));
+});
+
+test('employers can open the post job wizard and edit an existing job', function () {
+    $employer = User::factory()->employer()->create([
+        'company_name' => 'Horizon Hiring Ltd',
+    ]);
+    $job = JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'title' => 'Backend Engineer',
+    ]);
+
+    $this->actingAs($employer)
+        ->get(route('employer.jobs.create'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('backend/User/EmployerJobEditor')
+            ->where('job', null)
+            ->where('company.name', 'Horizon Hiring Ltd')
+            ->has('company.logo_url')
+            ->has('options.positionAreas')
+            ->where('options.positionAreas', fn ($areas) => collect($areas)->contains(
+                fn ($item) => ($item['value'] ?? null) === 'others' || ($item['label'] ?? null) === 'Others'
+            ))
+            ->has('options.employmentTypes')
+            ->has('options.countries')
+            ->has('options.dutyStations')
+            ->has('options.experienceLevels')
+            ->where('options.experienceLevels', fn ($levels) => collect($levels)->contains(
+                fn ($item) => ($item['value'] ?? null) === 'mid-level'
+            ))
+            ->where('ats.enabled', true)
+            ->where('ats.quality.show', true)
+            ->where('ats.quality.missing_skills', true));
+
+    $this->actingAs($employer)
+        ->get(route('employer.jobs.edit', $job))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('backend/User/EmployerJobEditor')
+            ->where('job.title', 'Backend Engineer')
+            ->where('job.id', $job->id)
+            ->where('job.slug', $job->slug)
+            ->where('company.name', 'Horizon Hiring Ltd')
+            ->where('ats.enabled', true));
+});
+
+test('job editor ATS quality hint clears when skills and description are sufficient', function () {
+    $employer = User::factory()->employer()->create();
+    $job = JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'skills' => ['Laravel', 'React'],
+        'requirements' => str_repeat('Need strong backend and frontend experience. ', 4),
+        'description' => str_repeat('Build and ship product features with the team. ', 4),
+    ]);
+
+    $this->actingAs($employer)
+        ->get(route('employer.jobs.edit', $job))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('ats.enabled', true)
+            ->where('ats.quality.show', false)
+            ->where('ats.quality.missing_skills', false)
+            ->where('ats.quality.thin_description', false));
+});
+
+test('employers cannot save a job with a free-text category', function () {
+    $employer = User::factory()->employer()->create();
+
+    $this->actingAs($employer)
+        ->post(route('employer.jobs.store'), [
+            'title' => 'Hospital Administrator',
+            'subtitle' => 'Lead patient operations across clinics',
+            'category' => 'Hospitality Management',
+            'location' => 'Khartoum',
+            'employment_type' => 'Full-time',
+            'experience_level' => 'mid-level',
+            'publish' => false,
+        ])
+        ->assertSessionHasErrors(['category', 'location', 'employment_type']);
+});
+
+test('employers cannot save a job without location category or job type', function () {
+    $employer = User::factory()->employer()->create();
+
+    $this->actingAs($employer)
+        ->from(route('employer.jobs.create'))
+        ->post(route('employer.jobs.store'), [
+            'title' => 'Hospital Administrator',
+            'category' => '',
+            'location' => '',
+            'employment_type' => '',
+            'experience_level' => '',
+            'publish' => false,
+        ])
+        ->assertRedirect(route('employer.jobs.create'))
+        ->assertSessionHasErrors([
+            'category',
+            'location',
+            'employment_type',
+            'experience_level',
+        ]);
+
+    expect(JobPost::query()->count())->toBe(0);
+});
+
+test('employers can save a job with taxonomy selects', function () {
+    $employer = User::factory()->employer()->create();
+
+    $this->actingAs($employer)
+        ->post(route('employer.jobs.store'), [
+            'title' => 'Hospital Administrator',
+            'subtitle' => 'Lead patient operations across clinics',
+            'category' => 'healthcare',
+            'location' => 'khartoum',
+            'country' => 'sudan',
+            'employment_type' => 'full_time',
+            'experience_level' => 'mid-level',
+            'publish' => false,
+        ])
+        ->assertRedirect(route('employer.jobs'));
+
+    $job = JobPost::query()->first();
+
+    expect($job)->not->toBeNull()
+        ->and($job->category)->toBe('healthcare')
+        ->and($job->location)->toBe('khartoum')
+        ->and($job->country)->toBe('sudan')
+        ->and($job->subtitle)->toBe('Lead patient operations across clinics')
+        ->and($job->status)->toBe(JobPostStatus::Draft);
+});
+
+test('employers cannot create a job with inactive taxonomy options', function () {
+    $employer = User::factory()->employer()->create();
+
+    JobTaxonomy::query()
+        ->where('type', JobTaxonomyType::PositionArea->value)
+        ->where('slug', 'healthcare')
+        ->update(['is_active' => false]);
+
+    JobTaxonomy::forgetOptionsCache();
+
+    $this->actingAs($employer)
+        ->post(route('employer.jobs.store'), [
+            'title' => 'Hospital Administrator',
+            'category' => 'healthcare',
+            'location' => 'khartoum',
+            'country' => 'sudan',
+            'employment_type' => 'full_time',
+            'experience_level' => 'mid-level',
+            'publish' => false,
+        ])
+        ->assertSessionHasErrors('category');
+});
+
+test('employer job edit keeps inactive current taxonomies and blocks switching to other inactive ones', function () {
+    $employer = User::factory()->employer()->create();
+
+    $inactiveArea = JobTaxonomy::factory()->positionArea()->create([
+        'name' => 'Legacy Healthcare',
+        'slug' => 'legacy-healthcare',
+        'is_active' => false,
+    ]);
+    $otherInactiveArea = JobTaxonomy::factory()->positionArea()->inactive()->create([
+        'name' => 'Retired Ops',
+        'slug' => 'retired-ops',
+    ]);
+    $activeArea = JobTaxonomy::query()
+        ->where('type', JobTaxonomyType::PositionArea->value)
+        ->where('slug', 'technology')
+        ->firstOrFail();
+
+    JobTaxonomy::forgetOptionsCache();
+
+    $job = JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'title' => 'Legacy Role',
+        'category' => $inactiveArea->slug,
+        'location' => 'khartoum',
+        'country' => 'sudan',
+        'employment_type' => 'full_time',
+        'experience_level' => 'mid-level',
+        'status' => JobPostStatus::Draft,
+    ]);
+
+    $this->actingAs($employer)
+        ->get(route('employer.jobs.edit', $job))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('job.category', 'legacy-healthcare')
+            ->where('options.positionAreas', fn ($areas) => collect($areas)->contains(
+                fn ($item) => ($item['value'] ?? null) === 'legacy-healthcare'
+            ) && collect($areas)->doesntContain(
+                fn ($item) => ($item['value'] ?? null) === 'retired-ops'
+            )));
+
+    $this->actingAs($employer)
+        ->put(route('employer.jobs.update', $job), [
+            'title' => 'Legacy Role Updated',
+            'category' => 'legacy-healthcare',
+            'location' => 'khartoum',
+            'country' => 'sudan',
+            'employment_type' => 'full_time',
+            'experience_level' => 'mid-level',
+            'publish' => false,
+        ])
+        ->assertRedirect(route('employer.jobs'));
+
+    expect($job->fresh()->category)->toBe('legacy-healthcare')
+        ->and($job->fresh()->title)->toBe('Legacy Role Updated');
+
+    $this->actingAs($employer)
+        ->from(route('employer.jobs.edit', $job))
+        ->put(route('employer.jobs.update', $job), [
+            'title' => 'Legacy Role Updated',
+            'category' => $otherInactiveArea->slug,
+            'location' => 'khartoum',
+            'country' => 'sudan',
+            'employment_type' => 'full_time',
+            'experience_level' => 'mid-level',
+            'publish' => false,
+        ])
+        ->assertRedirect(route('employer.jobs.edit', $job))
+        ->assertSessionHasErrors('category');
+
+    $this->actingAs($employer)
+        ->put(route('employer.jobs.update', $job), [
+            'title' => 'Moved Role',
+            'category' => $activeArea->slug,
+            'location' => 'khartoum',
+            'country' => 'sudan',
+            'employment_type' => 'full_time',
+            'experience_level' => 'mid-level',
+            'publish' => false,
+        ])
+        ->assertRedirect(route('employer.jobs'));
+
+    expect($job->fresh()->category)->toBe('technology');
+
+    $this->actingAs($employer)
+        ->get(route('employer.jobs.edit', $job))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('job.category', 'technology')
+            ->where('options.positionAreas', fn ($areas) => collect($areas)->doesntContain(
+                fn ($item) => ($item['value'] ?? null) === 'legacy-healthcare'
+            )));
+
+    $this->actingAs($employer)
+        ->from(route('employer.jobs.edit', $job))
+        ->put(route('employer.jobs.update', $job), [
+            'title' => 'Moved Role',
+            'category' => 'legacy-healthcare',
+            'location' => 'khartoum',
+            'country' => 'sudan',
+            'employment_type' => 'full_time',
+            'experience_level' => 'mid-level',
+            'publish' => false,
+        ])
+        ->assertRedirect(route('employer.jobs.edit', $job))
+        ->assertSessionHasErrors('category');
+});
+
+test('employer job edit keeps legacy experience level labels as current options', function () {
+    $employer = User::factory()->employer()->create();
+
+    $job = JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'title' => 'Legacy Experience Role',
+        'category' => 'technology',
+        'location' => 'khartoum',
+        'country' => 'sudan',
+        'employment_type' => 'full_time',
+        'experience_level' => 'Mid Level',
+        'status' => JobPostStatus::Draft,
+    ]);
+
+    $this->actingAs($employer)
+        ->get(route('employer.jobs.edit', $job))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('job.experience_level', 'Mid Level')
+            ->where('options.experienceLevels', fn ($levels) => collect($levels)->contains(
+                fn ($item) => ($item['value'] ?? null) === 'Mid Level'
+            )));
+
+    $this->actingAs($employer)
+        ->put(route('employer.jobs.update', $job), [
+            'title' => 'Legacy Experience Role Updated',
+            'category' => 'technology',
+            'location' => 'khartoum',
+            'country' => 'sudan',
+            'employment_type' => 'full_time',
+            'experience_level' => 'Mid Level',
+            'publish' => false,
+        ])
+        ->assertRedirect(route('employer.jobs'));
+
+    expect($job->fresh()->experience_level)->toBe('Mid Level');
+});
+
+test('employers can save a draft and later submit it for review', function () {
+    $employer = User::factory()->employer()->create();
+
+    $this->actingAs($employer)
+        ->post(route('employer.jobs.store'), [
+            'title' => 'Product Designer',
+            'category' => 'design',
+            'location' => 'remote',
+            'country' => 'remote',
+            'employment_type' => 'full_time',
+            'experience_level' => 'senior',
+            'salary_range' => 'SAR 18,000–25,000',
+            'description' => '<p><strong>Design</strong> the portal. <span style="font-size: 18px">Impact role.</span></p><script>alert(1)</script>',
+            'requirements' => '<ul><li><strong>Figma</strong> and research.</li></ul><script>alert(1)</script><a href="javascript:alert(1)">bad</a>',
+            'skills' => 'Figma, UX',
+            'publish' => false,
+        ])
+        ->assertRedirect(route('employer.jobs'));
+
+    $job = JobPost::query()->first();
+
+    expect($job)->not->toBeNull()
+        ->and($job->status)->toBe(JobPostStatus::Draft)
+        ->and($job->category)->toBe('design')
+        ->and($job->skills)->toBe(['Figma', 'UX'])
+        ->and($job->description)->toContain('<strong>Design</strong>')
+        ->and($job->description)->toContain('font-size: 18px')
+        ->and($job->description)->not->toContain('<script>')
+        ->and($job->requirements)->toContain('<strong>Figma</strong>')
+        ->and($job->requirements)->not->toContain('<script>')
+        ->and($job->requirements)->not->toContain('javascript');
+
+    $this->actingAs($employer)
+        ->put(route('employer.jobs.update', $job), [
+            'title' => 'Senior Product Designer',
+            'category' => 'design',
+            'location' => 'remote',
+            'country' => 'remote',
+            'employment_type' => 'full_time',
+            'experience_level' => 'senior',
+            'description' => 'Design the portal.',
+            'publish' => true,
+        ])
+        ->assertRedirect(route('employer.jobs'));
+
+    expect($job->fresh()->status)->toBe(JobPostStatus::Pending)
+        ->and($job->fresh()->title)->toBe('Senior Product Designer');
+});
+
+test('publishing is blocked when the current public plan has no remaining credits', function () {
+    $employer = User::factory()->employer()->create([
+        'package' => EmployerPackage::Professional,
+    ]);
+    Package::factory()->create([
+        'slug' => EmployerPackage::Professional->value,
+        'job_credits' => 1,
+        'featured_credits' => 0,
+        'is_public' => true,
+        'is_active' => true,
+    ]);
+    JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'status' => JobPostStatus::Pending,
+    ]);
+
+    $this->actingAs($employer)
+        ->post(route('employer.jobs.store'), [
+            'title' => 'Second Role',
+            'category' => 'technology',
+            'location' => 'khartoum',
+            'country' => 'sudan',
+            'employment_type' => 'full_time',
+            'experience_level' => 'mid-level',
+            'publish' => true,
+        ])
+        ->assertSessionHasErrors('title');
+
+    $this->actingAs($employer)
+        ->post(route('employer.jobs.store'), [
+            'title' => 'Draft Role',
+            'category' => 'technology',
+            'location' => 'khartoum',
+            'country' => 'sudan',
+            'employment_type' => 'full_time',
+            'experience_level' => 'mid-level',
+            'publish' => false,
+        ])
+        ->assertRedirect(route('employer.jobs'));
+
+    expect(JobPost::query()->where('status', JobPostStatus::Draft)->count())->toBe(1);
+});
+
+test('employers can view the designed my jobs table with live stats', function () {
+    $employer = User::factory()->employer()->create();
+    JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'title' => 'Senior Frontend Developer',
+        'status' => JobPostStatus::Active,
+        'category' => 'Technology',
+        'location' => 'Riyadh',
+    ]);
+    JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'title' => 'Draft Role',
+        'status' => JobPostStatus::Draft,
+    ]);
+
+    $this->actingAs($employer)
+        ->get(route('employer.jobs'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('backend/User/EmployerJobs')
+            ->where('stats.total', 2)
+            ->where('stats.active', 1)
+            ->where('stats.draft', 1)
+            ->has('jobs.data', 2));
+});
+
+test('employers can duplicate pause and republish jobs they own', function () {
+    $employer = User::factory()->employer()->create();
+    $job = JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'status' => JobPostStatus::Active,
+        'title' => 'Frontend Developer',
+    ]);
+
+    $this->actingAs($employer)
+        ->post(route('employer.jobs.duplicate', $job))
+        ->assertRedirect();
+
+    $copy = JobPost::query()->where('title', 'Frontend Developer (Copy)')->first();
+
+    expect($copy)->not->toBeNull()
+        ->and($copy->status)->toBe(JobPostStatus::Draft)
+        ->and($copy->employer_id)->toBe($employer->id);
+
+    $this->actingAs($employer)
+        ->post(route('employer.jobs.pause', $job))
+        ->assertRedirect();
+
+    expect($job->fresh()->status)->toBe(JobPostStatus::Draft);
+
+    $this->actingAs($employer)
+        ->post(route('employer.jobs.publish', $job))
+        ->assertRedirect();
+
+    expect($job->fresh()->status)->toBe(JobPostStatus::Pending);
+});
+
+test('employers can delete jobs they own', function () {
+    $employer = User::factory()->employer()->create();
+    $job = JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'title' => 'Temporary Role',
+        'status' => JobPostStatus::Active,
+    ]);
+    $application = JobApplication::factory()->create([
+        'job_post_id' => $job->id,
+    ]);
+
+    $this->actingAs($employer)
+        ->from(route('employer.jobs'))
+        ->delete(route('employer.jobs.destroy', $job))
+        ->assertRedirect(route('employer.jobs'));
+
+    expect(JobPost::query()->find($job->id))->toBeNull()
+        ->and(JobApplication::query()->find($application->id))->toBeNull();
+});
+
+test('employers cannot delete jobs they do not own', function () {
+    $employer = User::factory()->employer()->create();
+    $otherJob = JobPost::factory()->create([
+        'title' => 'Someone Else Role',
+    ]);
+
+    $this->actingAs($employer)
+        ->delete(route('employer.jobs.destroy', $otherJob))
+        ->assertForbidden();
+
+    expect(JobPost::query()->find($otherJob->id))->not->toBeNull();
+});
+
+test('employers can select a public plan via manual payment approval', function () {
+    $employer = User::factory()->employer()->create([
+        'package' => EmployerPackage::Professional,
+    ]);
+    $business = Package::factory()->create([
+        'slug' => EmployerPackage::Premium->value,
+        'name' => EmployerPackage::Premium->label(),
+        'price' => 999,
+        'currency' => 'SDG',
+        'job_credits' => 15,
+        'featured_credits' => 2,
+        'is_public' => true,
+        'is_active' => true,
+        'is_featured' => true,
+    ]);
+
+    $payment = Payment::query()->create([
+        'employer_id' => $employer->id,
+        'package_id' => $business->id,
+        'amount' => $business->price,
+        'currency' => 'SDG',
+        'method' => 'bank_transfer',
+        'status' => PaymentStatus::Pending,
+        'reference' => 'BANK-TEST1234',
+    ]);
+
+    $admin = User::factory()->admin()->create();
+
+    $this->actingAs($admin)
+        ->post(route('admin.payments.approve', $payment))
+        ->assertRedirect();
+
+    expect($employer->fresh()->package)->toBe(EmployerPackage::Premium)
+        ->and($employer->fresh()->subscription_status)->toBe(SubscriptionStatus::Active);
+
+    $this->actingAs($employer)
+        ->get(route('employer.packages'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('backend/User/EmployerPackages')
+            ->where('plan.slug', EmployerPackage::Premium->value)
+            ->where('plan.job_credits', 15)
+            ->has('packages')
+            ->has('invoices.data'));
+
+    expect(Payment::query()->where('employer_id', $employer->id)->latest('id')->first())
+        ->status->toBe(PaymentStatus::Completed)
+        ->package_id->toBe($business->id);
+});
+
+test('employers can update company profile sections used by the dashboard', function () {
+    $employer = User::factory()->employer()->create();
+
+    $this->actingAs($employer)
+        ->put(route('employer.profile.update'), [
+            'company_name' => 'TechCorp Solutions',
+            'organization_type' => 'private_company',
+            'contact_name' => 'Fatima Al-Zahrani',
+            'industry' => 'Technology',
+            'company_size' => '51-200',
+            'founded_year' => 2018,
+            'website' => 'https://techcorp.test',
+            'linkedin_url' => 'https://linkedin.com/company/techcorp',
+            'about' => 'We hire across the GCC.',
+            'address' => 'Riyadh',
+            'phone' => '+966 11 000 0000',
+            'email' => $employer->email,
+        ])
+        ->assertRedirect();
+
+    $employer->refresh();
+
+    expect($employer->company_size)->toBe('51-200')
+        ->and($employer->founded_year)->toBe(2018)
+        ->and($employer->linkedin_url)->toBe('https://linkedin.com/company/techcorp');
+
+    $this->actingAs($employer)
+        ->get(route('employer.profile'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('profile.company_name', 'TechCorp Solutions')
+            ->where('completion.sections.social', true)
+            ->has('completion.percent'));
+});
+
+test('employer jobs index paginates and computes stats from the whole employer scope', function () {
+    $employer = User::factory()->employer()->create();
+    JobPost::factory()->count(31)->create([
+        'employer_id' => $employer->id,
+        'status' => JobPostStatus::Active,
+        'expires_at' => now()->addMonth(),
+    ]);
+    JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'status' => JobPostStatus::Active,
+        'expires_at' => now()->subWeek(),
+    ]);
+    JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'status' => JobPostStatus::Pending,
+    ]);
+    JobPost::factory()->create(['status' => JobPostStatus::Active]);
+
+    $this->actingAs($employer)
+        ->get(route('employer.jobs'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('jobs.data', 30)
+            ->where('jobs.total', 33)
+            ->where('jobs.last_page', 2)
+            ->where('stats.total', 33)
+            ->where('stats.active', 31)
+            ->where('stats.draft', 1)
+            ->where('stats.expired', 1));
+
+    $this->actingAs($employer)
+        ->get(route('employer.jobs', ['page' => 2]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('jobs.data', 3)
+            ->where('stats.total', 33));
+});
+
+test('employer jobs index filters by search and status on the server', function () {
+    $employer = User::factory()->employer()->create();
+    JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'title' => 'Nurse Lead',
+        'status' => JobPostStatus::Active,
+        'expires_at' => now()->addWeek(),
+    ]);
+    JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'title' => 'Draft Engineer',
+        'status' => JobPostStatus::Draft,
+    ]);
+    JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'title' => 'Closed Clerk',
+        'status' => JobPostStatus::Rejected,
+    ]);
+    JobPost::factory()->create([
+        'employer_id' => $employer->id,
+        'title' => 'Old Listing',
+        'status' => JobPostStatus::Active,
+        'expires_at' => now()->subWeek(),
+    ]);
+
+    $titlesFor = function (array $query) use ($employer): array {
+        $titles = [];
+
+        $this->actingAs($employer)
+            ->get(route('employer.jobs', $query))
+            ->assertOk()
+            ->assertInertia(function ($page) use (&$titles) {
+                $titles = collect($page->toArray()['props']['jobs']['data'])->pluck('title')->sort()->values()->all();
+
+                return $page->where('stats.total', 4);
+            });
+
+        return $titles;
+    };
+
+    expect($titlesFor(['search' => 'nurse']))->toBe(['Nurse Lead'])
+        ->and($titlesFor(['filter' => 'active']))->toBe(['Nurse Lead'])
+        ->and($titlesFor(['filter' => 'draft']))->toBe(['Draft Engineer'])
+        ->and($titlesFor(['filter' => 'closed']))->toBe(['Closed Clerk'])
+        ->and($titlesFor(['filter' => 'expired']))->toBe(['Old Listing'])
+        ->and($titlesFor(['filter' => 'bogus']))->toHaveCount(4);
+});
+
+test('employer packages paginates invoices but keeps the full package catalog', function () {
+    $employer = User::factory()->employer()->create();
+    $package = Package::factory()->create();
+    Payment::factory()->count(31)->create([
+        'employer_id' => $employer->id,
+        'package_id' => $package->id,
+    ]);
+
+    $this->actingAs($employer)
+        ->get(route('employer.packages'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('invoices.data', 30)
+            ->where('invoices.total', 31)
+            ->where('invoices.per_page', 30)
+            ->where('packages', fn ($packages): bool => ! isset($packages['data'])));
+
+    $this->actingAs($employer)
+        ->get(route('employer.packages', ['page' => 2]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('invoices.data', 1));
+});

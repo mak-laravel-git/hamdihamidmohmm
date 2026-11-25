@@ -1,0 +1,396 @@
+import { Head, Link, router, usePage } from '@inertiajs/react';
+import { useEffect, useState } from 'react';
+
+import { AdminIcon } from '@/components/admin-icon';
+import {
+    MobileListCard,
+    MobileListCardActions,
+    MobileListCardHeader,
+    MobileListCardMeta,
+} from '@/components/mobile-list-card';
+import { PortalPagination } from '@/components/portal-pagination';
+import { Input } from '@/components/ui/input';
+import { useLocale } from '@/hooks/use-locale';
+import AdminPortalLayout from '@/layouts/admin-portal-layout';
+import { cn } from '@/lib/utils';
+import type { SharedData } from '@/types';
+
+type RoleOption = {
+    value: string;
+    label: string;
+};
+
+type ManagedUser = {
+    id: number;
+    name: string;
+    email: string;
+    role: number | null;
+    role_name: string | null;
+    role_label: string;
+    permissions: string[];
+    created_at: string | null;
+    is_self: boolean;
+};
+
+type PaginatedUsers = {
+    data: ManagedUser[];
+    links: Array<{ url: string | null; label: string; active: boolean }>;
+    from: number | null;
+    to: number | null;
+    total: number;
+};
+
+type Props = {
+    users: PaginatedUsers;
+    filters: { role: string; search?: string };
+    roleCounts: Record<string, number>;
+    roles: RoleOption[];
+    canManageAdmins: boolean;
+};
+
+const roleBadgeStyles: Record<string, string> = {
+    'super-admin': 'bg-[#f3e8ff] text-[#7e22ce]',
+    admin: 'bg-[#dbeafe] text-[#1d4ed8]',
+    'job-seeker': 'bg-[#dcfce7] text-[#15803d]',
+    employer: 'bg-[#ffedd5] text-[#c2410c]',
+};
+
+export default function UserManagement({
+    users,
+    filters,
+    roleCounts,
+    canManageAdmins,
+}: Props) {
+    const { flash } = usePage<SharedData>().props;
+    const { t } = useLocale();
+    const [search, setSearch] = useState(filters.search ?? '');
+
+    useEffect(() => {
+        setSearch(filters.search ?? '');
+    }, [filters.search]);
+
+    useEffect(() => {
+        const handle = window.setTimeout(() => {
+            const next = search.trim();
+            const current = (filters.search ?? '').trim();
+
+            if (next === current) {
+                return;
+            }
+
+            router.get(
+                '/admin/users',
+                {
+                    ...(filters.role ? { role: filters.role } : {}),
+                    ...(next !== '' ? { search: next } : {}),
+                },
+                { preserveState: true, replace: true },
+            );
+        }, 300);
+
+        return () => window.clearTimeout(handle);
+    }, [search, filters.role, filters.search]);
+
+    return (
+        <AdminPortalLayout>
+            <Head title={t('admin.users.title')} />
+
+            <div className="space-y-6 p-6">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <h1 className="text-[28px] font-extrabold tracking-tight text-[#050315]">
+                            {t('admin.users.title')}
+                        </h1>
+                        <p className="mt-1 text-sm text-[#3977a6]">
+                            {t('admin.users.subtitle')}
+                        </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <Link
+                            href="/admin/roles-permissions"
+                            className="inline-flex items-center justify-center rounded-xl border border-[#e2e8f0] bg-white px-4 py-2.5 text-sm font-semibold text-[#0057c8] hover:bg-[#f8fafc]"
+                        >
+                            {t('admin.roles.title')}
+                        </Link>
+                        {canManageAdmins && (
+                            <Link
+                                href="/admin/admins"
+                                className="inline-flex items-center justify-center rounded-xl bg-[#0057c8] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0046a3]"
+                            >
+                                {t('admin.admins.create')}
+                            </Link>
+                        )}
+                    </div>
+                </div>
+
+                {flash.success && (
+                    <div className="rounded-xl border border-[#bbf7d0] bg-[#f0fdf4] px-4 py-3 text-sm text-[#15803d]">
+                        {typeof flash.success === 'string'
+                            ? flash.success
+                            : t('common.saved')}
+                    </div>
+                )}
+
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                    {[
+                        ['all', t('admin.users.filters.all'), roleCounts.all ?? 0],
+                        [
+                            'super-admin',
+                            t('admin.users.filters.super_admin'),
+                            roleCounts['super-admin'] ?? 0,
+                        ],
+                        ['admin', t('admin.users.filters.admins'), roleCounts.admin ?? 0],
+                        [
+                            'job-seeker',
+                            t('admin.users.filters.job_seekers'),
+                            roleCounts['job-seeker'] ?? 0,
+                        ],
+                        ['employer', t('admin.users.filters.employers'), roleCounts.employer ?? 0],
+                    ].map(([key, label, count]) => (
+                        <button
+                            key={key}
+                            type="button"
+                            onClick={() =>
+                                router.get(
+                                    '/admin/users',
+                                    {
+                                        ...(key === 'all' ? {} : { role: key }),
+                                        ...((filters.search ?? '').trim() !== ''
+                                            ? { search: filters.search }
+                                            : {}),
+                                    },
+                                    { preserveState: true, replace: true },
+                                )
+                            }
+                            className={cn(
+                                'rounded-2xl border bg-white p-4 text-left shadow-[0px_1px_3px_rgba(0,0,0,0.06)] transition-colors',
+                                (filters.role || 'all') === key
+                                    ? 'border-[#0057c8] ring-1 ring-[#0057c8]'
+                                    : 'border-[#e2e8f0]',
+                            )}
+                        >
+                            <p className="text-2xl font-extrabold text-[#101828]">
+                                {count}
+                            </p>
+                            <p className="mt-1 text-xs font-medium text-[#6a7282]">
+                                {label}
+                            </p>
+                        </button>
+                    ))}
+                </div>
+
+                <div className="rounded-2xl border border-[#e2e8f0] bg-white p-5 shadow-[0px_1px_3px_rgba(0,0,0,0.06)]">
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-2">
+                            <AdminIcon
+                                src="/images/admin/nav-job-seekers.svg"
+                                size={16}
+                                tint
+                                className="text-[#0057c8]"
+                            />
+                            <h2 className="text-base font-bold text-[#101828]">
+                                {t('admin.users.directory')}
+                            </h2>
+                        </div>
+                        <Input
+                            value={search}
+                            onChange={(event) => setSearch(event.target.value)}
+                            placeholder={t('admin.users.search_placeholder')}
+                            className="max-w-sm rounded-xl"
+                        />
+                    </div>
+
+                    <div className="space-y-3 md:hidden">
+                        {users.data.map((user) => (
+                            <MobileListCard key={user.id}>
+                                <MobileListCardHeader
+                                    title={user.name}
+                                    subtitle={user.email}
+                                    leading={
+                                        <div className="flex size-9 items-center justify-center rounded-full bg-gradient-to-br from-[#0057c8] to-[#3b82f6] text-xs font-bold text-white">
+                                            {user.name.slice(0, 2).toUpperCase()}
+                                        </div>
+                                    }
+                                    badge={
+                                        <span
+                                            className={cn(
+                                                'rounded-full px-2.5 py-1 text-xs font-semibold',
+                                                roleBadgeStyles[
+                                                    user.role_name ?? ''
+                                                ] ??
+                                                    'bg-[#f1f5f9] text-[#64748b]',
+                                            )}
+                                        >
+                                            {user.role_label}
+                                        </span>
+                                    }
+                                />
+                                <MobileListCardMeta
+                                    items={[
+                                        {
+                                            label: t(
+                                                'admin.users.cols.permissions',
+                                            ),
+                                            value:
+                                                user.permissions.length > 0
+                                                    ? t(
+                                                          'admin.users.permissions_assigned',
+                                                          {
+                                                              count: user
+                                                                  .permissions
+                                                                  .length,
+                                                          },
+                                                      )
+                                                    : t(
+                                                          'admin.users.role_defaults',
+                                                      ),
+                                        },
+                                        {
+                                            label: t('common.created'),
+                                            value: user.created_at,
+                                        },
+                                    ]}
+                                />
+                                <MobileListCardActions
+                                    primary={
+                                        <Link
+                                            href={`/admin/users/${user.id}`}
+                                            className="inline-flex h-9 w-full items-center justify-center rounded-xl bg-[#0057c8] px-3 text-xs font-semibold text-white"
+                                        >
+                                            {t('common.view')}
+                                        </Link>
+                                    }
+                                    moreItems={
+                                        canManageAdmins ||
+                                        user.role_name !== 'super-admin'
+                                            ? [
+                                                  {
+                                                      key: 'edit',
+                                                      label: t('common.edit'),
+                                                      href: `/admin/users/${user.id}/edit`,
+                                                  },
+                                              ]
+                                            : []
+                                    }
+                                />
+                            </MobileListCard>
+                        ))}
+                    </div>
+
+                    <div className="hidden overflow-x-auto md:block">
+                        <table className="min-w-full text-left text-sm">
+                            <thead className="border-b border-[#e2e8f0] text-[#64748b]">
+                                <tr>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('admin.users.cols.name')}
+                                    </th>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('admin.users.cols.email')}
+                                    </th>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('admin.users.cols.role')}
+                                    </th>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('admin.users.cols.permissions')}
+                                    </th>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('common.created')}
+                                    </th>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('common.actions')}
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {users.data.map((user) => (
+                                    <tr
+                                        key={user.id}
+                                        className="border-b border-[#f1f5f9]"
+                                    >
+                                        <td className="px-3 py-3">
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex size-9 items-center justify-center rounded-full bg-gradient-to-br from-[#0057c8] to-[#3b82f6] text-xs font-bold text-white">
+                                                    {user.name
+                                                        .slice(0, 2)
+                                                        .toUpperCase()}
+                                                </div>
+                                                <div>
+                                                    <p className="font-semibold text-[#101828]">
+                                                        {user.name}
+                                                    </p>
+                                                    <p className="text-xs text-[#99a1af]">
+                                                        ID-{user.id}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-3 py-3 text-[#64748b]">
+                                            {user.email}
+                                        </td>
+                                        <td className="px-3 py-3">
+                                            <span
+                                                className={cn(
+                                                    'rounded-full px-2.5 py-1 text-xs font-semibold',
+                                                    roleBadgeStyles[
+                                                    user.role_name ?? ''
+                                                    ] ??
+                                                    'bg-[#f1f5f9] text-[#64748b]',
+                                                )}
+                                            >
+                                                {user.role_label}
+                                            </span>
+                                        </td>
+                                        <td className="px-3 py-3 text-xs text-[#64748b]">
+                                            {user.permissions.length > 0
+                                                ? t(
+                                                      'admin.users.permissions_assigned',
+                                                      {
+                                                          count: user
+                                                              .permissions
+                                                              .length,
+                                                      },
+                                                  )
+                                                : t('admin.users.role_defaults')}
+                                        </td>
+                                        <td className="px-3 py-3 text-[#99a1af]">
+                                            {user.created_at ?? '—'}
+                                        </td>
+                                        <td className="px-3 py-3">
+                                            <div className="flex flex-wrap gap-2">
+                                                <Link
+                                                    href={`/admin/users/${user.id}`}
+                                                    className="inline-flex h-9 items-center rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs font-semibold text-[#0057c8] hover:bg-[#f8faff]"
+                                                >
+                                                    {t('common.view')}
+                                                </Link>
+                                                {(canManageAdmins ||
+                                                    user.role_name !==
+                                                    'super-admin') && (
+                                                        <Link
+                                                            href={`/admin/users/${user.id}/edit`}
+                                                            className="inline-flex h-9 items-center rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs font-semibold text-[#101828] hover:bg-[#f8faff]"
+                                                        >
+                                                            {t('common.edit')}
+                                                        </Link>
+                                                    )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <PortalPagination
+                        showingLabel={t('common.showing_range', {
+                            from: users.from ?? 0,
+                            to: users.to ?? 0,
+                            total: users.total,
+                        })}
+                        links={users.links}
+                    />
+                </div>
+            </div>
+        </AdminPortalLayout>
+    );
+}

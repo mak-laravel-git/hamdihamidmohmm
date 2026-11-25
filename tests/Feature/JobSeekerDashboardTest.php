@@ -1,0 +1,298 @@
+<?php
+
+use App\Enums\JobApplicationStatus;
+use App\Enums\JobPostStatus;
+use App\Models\JobApplication;
+use App\Models\JobPost;
+use App\Models\JobSeekerProfile;
+use App\Models\User;
+use App\Notifications\PortalNotification;
+
+test('job seeker dashboard matches the Figma stats checklist and notifications props', function () {
+    $seeker = User::factory()->jobSeeker()->create([
+        'name' => 'Ahmed Al-Rashidi',
+        'phone' => '+966 50 123 4567',
+        'location' => 'Riyadh',
+    ]);
+
+    JobSeekerProfile::factory()->create([
+        'user_id' => $seeker->id,
+        'headline' => 'Senior Frontend Developer',
+        'skills' => ['React', 'TypeScript'],
+        'education' => [['degree' => 'BSc', 'school' => 'KFUPM']],
+        'experience' => [],
+        'certifications' => [],
+    ]);
+
+    $job = JobPost::factory()->create([
+        'title' => 'Senior Frontend Developer',
+        'status' => JobPostStatus::Active,
+    ]);
+
+    JobApplication::factory()->create([
+        'job_post_id' => $job->id,
+        'job_seeker_id' => $seeker->id,
+        'status' => JobApplicationStatus::UnderReview,
+        'created_at' => now()->subMinute(),
+    ]);
+
+    JobApplication::factory()->create([
+        'job_post_id' => JobPost::factory()->create(['status' => JobPostStatus::Active])->id,
+        'job_seeker_id' => $seeker->id,
+        'status' => JobApplicationStatus::Shortlisted,
+        'created_at' => now()->subMinutes(2),
+    ]);
+
+    JobPost::factory()->create([
+        'title' => 'Open Backend Role',
+        'status' => JobPostStatus::Active,
+        'location' => 'Jeddah',
+        'employment_type' => 'Full-time',
+    ]);
+
+    $seeker->notify(new PortalNotification(
+        'Interview Invitation',
+        'You have been invited to interview.',
+        'interview',
+    ));
+
+    $this->actingAs($seeker)
+        ->get(route('job-seeker.dashboard'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('backend/User/JobSeekerDashboard')
+            ->where('stats.total', 2)
+            ->where('stats.under_review', 1)
+            ->where('stats.shortlisted', 1)
+            ->has('stats.completion')
+            ->has('checklist')
+            ->where('applications.0.status', 'Under Review')
+            ->where('notifications.0.title', 'Interview Invitation')
+            ->where('notifications.0.read', false)
+            ->has('open_jobs', 1)
+            ->where('open_jobs.0.title', 'Open Backend Role')
+            ->missing('stats.active')
+            ->missing('stats.interviews'));
+});
+
+test('job seekers can apply to an open job from the dashboard', function () {
+    $seeker = User::factory()->jobSeeker()->create();
+    JobSeekerProfile::factory()->create(['user_id' => $seeker->id]);
+
+    $job = JobPost::factory()->create([
+        'title' => 'Dashboard Apply Role',
+        'status' => JobPostStatus::Active,
+    ]);
+
+    $this->actingAs($seeker)
+        ->from(route('job-seeker.dashboard'))
+        ->post(route('jobs.apply', $job), [
+            'cover_letter' => 'I would like to apply for the Dashboard Apply Role position today.',
+        ])
+        ->assertRedirect(route('job-seeker.dashboard'))
+        ->assertSessionHas('success', 'application_submitted');
+
+    expect(JobApplication::query()
+        ->where('job_seeker_id', $seeker->id)
+        ->where('job_post_id', $job->id)
+        ->exists())->toBeTrue();
+
+    $this->actingAs($seeker)
+        ->get(route('job-seeker.dashboard'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('stats.total', 1)
+            ->has('open_jobs', 0)
+            ->where('applications.0.title', 'Dashboard Apply Role'));
+});
+
+test('job seekers can update extended professional profile fields', function () {
+    $seeker = User::factory()->jobSeeker()->create(['name' => 'Ali Khan']);
+
+    JobSeekerProfile::factory()->create(['user_id' => $seeker->id]);
+
+    $this->actingAs($seeker)
+        ->put(route('job-seeker.profile.update'), [
+            'name' => 'Ali Khan',
+            'phone' => '+971 50 111 2222',
+            'location' => 'Dubai, UAE',
+            'headline' => 'Senior Frontend Developer',
+            'current_title' => 'Frontend Lead',
+            'bio' => 'Builds interfaces.',
+            'linkedin_url' => 'https://linkedin.com/in/ali',
+            'github_url' => 'https://github.com/ali',
+            'industry' => 'Information Technology',
+            'expected_salary' => 'SAR 18,000 - 22,000',
+            'availability' => ['Full Time', 'Remote'],
+            'skills' => ['React', 'TypeScript'],
+            'education' => [['degree' => 'BSc CS', 'school' => 'KFUPM', 'years' => '2015 - 2019']],
+            'experience' => [['title' => 'Developer', 'company' => 'Nova', 'years' => 3]],
+            'languages' => [['name' => 'English', 'level' => 'Advanced']],
+            'certifications' => [['name' => 'AWS', 'issuer' => 'Amazon', 'date' => '2024-03']],
+        ])
+        ->assertRedirect();
+
+    $profile = $seeker->fresh()->jobSeekerProfile;
+
+    expect($profile)->not->toBeNull()
+        ->and($profile?->current_title)->toBe('Frontend Lead')
+        ->and($profile?->linkedin_url)->toBe('https://linkedin.com/in/ali')
+        ->and($profile?->github_url)->toBe('https://github.com/ali')
+        ->and($profile?->industry)->toBe('Information Technology')
+        ->and($profile?->expected_salary)->toBe('SAR 18,000 - 22,000')
+        ->and($profile?->availability)->toBe(['Full Time', 'Remote']);
+});
+
+test('job seekers can save professional fields from comma-separated form strings', function () {
+    $seeker = User::factory()->jobSeeker()->create(['name' => 'Sara Ali']);
+
+    JobSeekerProfile::factory()->create([
+        'user_id' => $seeker->id,
+        'current_title' => null,
+        'industry' => null,
+        'expected_salary' => null,
+        'availability' => null,
+    ]);
+
+    $this->actingAs($seeker)
+        ->from(route('job-seeker.profile'))
+        ->put(route('job-seeker.profile.update'), [
+            'name' => 'Sara Ali',
+            'phone' => '+971 50 000 1111',
+            'location' => 'Riyadh',
+            'headline' => 'Product Designer',
+            'current_title' => 'Ipsa natus ut et te',
+            'bio' => 'Designer bio',
+            'linkedin_url' => '',
+            'github_url' => '',
+            'industry' => 'Molestiae eiusmod nu',
+            'expected_salary' => 'Tempore suscipit in',
+            'availability' => 'Full Time, Remote',
+            'skills' => 'Figma, React',
+            'education' => '[]',
+            'experience' => '[]',
+            'languages' => '[]',
+            'certifications' => '[]',
+        ])
+        ->assertRedirect(route('job-seeker.profile'));
+
+    $profile = $seeker->fresh()->jobSeekerProfile;
+
+    expect($profile?->current_title)->toBe('Ipsa natus ut et te')
+        ->and($profile?->industry)->toBe('Molestiae eiusmod nu')
+        ->and($profile?->expected_salary)->toBe('Tempore suscipit in')
+        ->and($profile?->availability)->toBe(['Full Time', 'Remote'])
+        ->and($profile?->skills)->toBe(['Figma', 'React']);
+
+    $this->actingAs($seeker)
+        ->get(route('job-seeker.profile'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('profile.current_title', 'Ipsa natus ut et te')
+            ->where('profile.industry', 'Molestiae eiusmod nu')
+            ->where('profile.expected_salary', 'Tempore suscipit in')
+            ->where('profile.availability', ['Full Time', 'Remote']));
+});
+
+test('job seeker applications page includes filter counts and job urls', function () {
+    $seeker = User::factory()->jobSeeker()->create();
+    $job = JobPost::factory()->create([
+        'title' => 'UX Designer',
+        'slug' => 'ux-designer-demo',
+        'status' => JobPostStatus::Active,
+    ]);
+
+    JobApplication::factory()->create([
+        'job_post_id' => $job->id,
+        'job_seeker_id' => $seeker->id,
+        'status' => JobApplicationStatus::Interview,
+    ]);
+
+    $this->actingAs($seeker)
+        ->get(route('job-seeker.applications'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('backend/User/JobSeekerApplications')
+            ->where('stats.total', 1)
+            ->where('stats.interviews', 1)
+            ->where('filters.3.value', 'interview')
+            ->where('filters.3.count', 1)
+            ->where('applications.data.0.slug', 'ux-designer-demo')
+            ->where('applications.data.0.job_url', route('jobs.show', 'ux-designer-demo'))
+            ->where('applications.data.0.progress', 4));
+});
+
+test('job seeker applications are filtered and paginated on the server', function () {
+    $seeker = User::factory()->jobSeeker()->create();
+
+    JobApplication::factory()->count(31)->create([
+        'job_seeker_id' => $seeker->id,
+        'status' => JobApplicationStatus::Applied,
+    ]);
+    JobApplication::factory()->count(2)->create([
+        'job_seeker_id' => $seeker->id,
+        'status' => JobApplicationStatus::Interview,
+    ]);
+    JobApplication::factory()->create([
+        'job_seeker_id' => $seeker->id,
+        'status' => JobApplicationStatus::Rejected,
+    ]);
+    JobApplication::factory()->create(['status' => JobApplicationStatus::Interview]);
+
+    $this->actingAs($seeker)
+        ->get(route('job-seeker.applications'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('applications.data', 30)
+            ->where('applications.total', 34)
+            ->where('selectedStatus', 'all')
+            ->where('stats.total', 34)
+            ->where('stats.active', 33)
+            ->where('stats.interviews', 2)
+            ->where('filters.0.value', 'applied')
+            ->where('filters.0.count', 31));
+
+    $this->actingAs($seeker)
+        ->get(route('job-seeker.applications', ['status' => 'interview']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('applications.data', 2)
+            ->where('applications.total', 2)
+            ->where('selectedStatus', 'interview')
+            ->where('stats.total', 34)
+            ->where('applications.data.0.status_value', 'interview'));
+
+    $this->actingAs($seeker)
+        ->get(route('job-seeker.applications', ['status' => 'applied', 'page' => 2]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('applications.data', 1));
+
+    $this->actingAs($seeker)
+        ->get(route('job-seeker.applications', ['status' => 'nonsense']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('selectedStatus', 'all')
+            ->where('applications.total', 34));
+});
+
+test('job seeker notifications are paginated at the default page size', function () {
+    $seeker = User::factory()->jobSeeker()->create();
+
+    foreach (range(1, 31) as $index) {
+        $seeker->notifyNow(new PortalNotification("Notice {$index}", 'Message', 'System'));
+    }
+
+    $this->actingAs($seeker)
+        ->get(route('job-seeker.notifications'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('backend/User/JobSeekerNotifications')
+            ->has('notifications.data', 30)
+            ->where('notifications.total', 31)
+            ->where('unread', 31));
+
+    $this->actingAs($seeker)
+        ->get(route('job-seeker.notifications', ['page' => 2]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('notifications.data', 1));
+});

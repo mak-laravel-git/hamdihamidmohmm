@@ -1,0 +1,380 @@
+import { Form, Head, Link, router, usePage } from '@inertiajs/react';
+
+import { AdminIcon } from '@/components/admin-icon';
+import { AdminPagination } from '@/components/admin-portal/ui';
+import {
+    MobileListCard,
+    MobileListCardActions,
+    MobileListCardHeader,
+    MobileListCardMeta,
+} from '@/components/mobile-list-card';
+import type { PortalPaginator } from '@/components/portal-pagination';
+import { useLocale } from '@/hooks/use-locale';
+import AdminPortalLayout from '@/layouts/admin-portal-layout';
+import { cn } from '@/lib/utils';
+import type { SharedData } from '@/types';
+
+type RoleCard = {
+    id: number;
+    value: string;
+    label: string;
+    description: string | null;
+    users_count: number;
+    permissions_count: number;
+    editable: boolean;
+    locked: boolean;
+    is_system: boolean;
+    can_delete: boolean;
+    kind: 'admin-panel' | 'portal';
+};
+
+type PermissionMatrixRow = {
+    name: string;
+    label: string;
+    group: string;
+    roles: Record<string, boolean>;
+};
+
+type Props = {
+    roles: PortalPaginator<RoleCard>;
+    permissionMatrix: PermissionMatrixRow[];
+    canManageAdmins: boolean;
+};
+
+const roleBadgeStyles: Record<string, string> = {
+    'super-admin': 'bg-[#f3e8ff] text-[#7e22ce]',
+    admin: 'bg-[#dbeafe] text-[#1d4ed8]',
+    'job-seeker': 'bg-[#dcfce7] text-[#15803d]',
+    employer: 'bg-[#ffedd5] text-[#c2410c]',
+};
+
+export default function RolePermissions({
+    roles: rolesPage,
+    permissionMatrix,
+    canManageAdmins,
+}: Props) {
+    const { flash } = usePage<SharedData>().props;
+    const { t } = useLocale();
+    const roles = rolesPage.data;
+
+    return (
+        <AdminPortalLayout>
+            <Head title={t('admin.roles.title')} />
+
+            <div className="space-y-6 p-6">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <h1 className="text-[28px] font-extrabold tracking-tight text-[#050315]">
+                            {t('admin.roles.title')}
+                        </h1>
+                        <p className="mt-1 text-sm text-[#3977a6]">
+                            {t('admin.roles.subtitle')}
+                        </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <Link
+                            href="/admin/users"
+                            className="inline-flex items-center justify-center rounded-xl border border-[#e2e8f0] bg-white px-4 py-2.5 text-sm font-semibold text-[#0057c8] hover:bg-[#f8fafc]"
+                        >
+                            {t('admin.users.all')}
+                        </Link>
+                        {canManageAdmins && (
+                            <Link
+                                href="/admin/roles-permissions/create"
+                                className="inline-flex items-center justify-center rounded-xl bg-[#0057c8] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0046a3]"
+                            >
+                                {t('admin.roles.create')}
+                            </Link>
+                        )}
+                    </div>
+                </div>
+
+                {flash.success && (
+                    <div className="rounded-xl border border-[#bbf7d0] bg-[#f0fdf4] px-4 py-3 text-sm text-[#15803d]">
+                        {typeof flash.success === 'string'
+                            ? flash.success
+                            : t('common.saved')}
+                    </div>
+                )}
+
+                <div className="rounded-2xl border border-[#e2e8f0] bg-white p-5 shadow-[0px_1px_3px_rgba(0,0,0,0.06)]">
+                    <div className="mb-4 flex items-center gap-2">
+                        <AdminIcon
+                            src="/images/admin/nav-verification.svg"
+                            size={16}
+                            tint
+                            className="text-[#0057c8]"
+                        />
+                        <div>
+                            <h2 className="text-base font-bold text-[#101828]">
+                                {t('admin.roles.list_title')}
+                            </h2>
+                            <p className="text-xs text-[#99a1af]">
+                                {t('admin.roles.list_help')}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-3 md:hidden">
+                        {roles.map((role) => (
+                            <MobileListCard key={role.id}>
+                                <MobileListCardHeader
+                                    title={role.label}
+                                    subtitle={
+                                        role.description || role.value
+                                    }
+                                    badge={
+                                        <span
+                                            className={cn(
+                                                'rounded-full px-2.5 py-1 text-xs font-semibold',
+                                                roleBadgeStyles[role.value] ??
+                                                    'bg-[#eef2ff] text-[#3730a3]',
+                                            )}
+                                        >
+                                            {role.locked
+                                                ? t('status.locked')
+                                                : role.is_system
+                                                  ? t('status.system')
+                                                  : t('status.custom')}
+                                        </span>
+                                    }
+                                />
+                                <MobileListCardMeta
+                                    items={[
+                                        {
+                                            label: t('admin.roles.cols.users'),
+                                            value: role.users_count,
+                                        },
+                                        {
+                                            label: t(
+                                                'admin.roles.cols.permissions',
+                                            ),
+                                            value: role.permissions_count,
+                                        },
+                                    ]}
+                                />
+                                <MobileListCardActions
+                                    primary={
+                                        <Link
+                                            href={`/admin/roles-permissions/${role.id}`}
+                                            className="inline-flex h-9 w-full items-center justify-center rounded-xl bg-[#0057c8] px-3 text-xs font-semibold text-white"
+                                        >
+                                            {t('common.view')}
+                                        </Link>
+                                    }
+                                    moreItems={[
+                                        ...(canManageAdmins && role.editable
+                                            ? [
+                                                  {
+                                                      key: 'edit',
+                                                      label: t('common.edit'),
+                                                      href: `/admin/roles-permissions/${role.id}/edit`,
+                                                  },
+                                              ]
+                                            : []),
+                                        ...(canManageAdmins && role.can_delete
+                                            ? [
+                                                  {
+                                                      key: 'delete',
+                                                      label: t('common.delete'),
+                                                      onSelect: () =>
+                                                          router.delete(
+                                                              `/admin/roles-permissions/${role.id}`,
+                                                          ),
+                                                      destructive: true,
+                                                  },
+                                              ]
+                                            : []),
+                                    ]}
+                                />
+                            </MobileListCard>
+                        ))}
+                    </div>
+
+                    <div className="hidden overflow-x-auto md:block">
+                        <table className="min-w-full text-left text-sm">
+                            <thead className="border-b border-[#e2e8f0] text-[#64748b]">
+                                <tr>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('admin.roles.cols.name')}
+                                    </th>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('admin.roles.cols.key')}
+                                    </th>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('admin.roles.cols.users')}
+                                    </th>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('admin.roles.cols.permissions')}
+                                    </th>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('common.actions')}
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {roles.map((role) => (
+                                    <tr
+                                        key={role.id}
+                                        className="border-b border-[#f1f5f9]"
+                                    >
+                                        <td className="px-3 py-3">
+                                            <div className="flex flex-col gap-1">
+                                                <span
+                                                    className={cn(
+                                                        'w-fit rounded-full px-2.5 py-1 text-xs font-semibold',
+                                                        roleBadgeStyles[
+                                                            role.value
+                                                        ] ??
+                                                            'bg-[#eef2ff] text-[#3730a3]',
+                                                    )}
+                                                >
+                                                    {role.label}
+                                                </span>
+                                                <span className="text-xs text-[#99a1af]">
+                                                    {role.description ||
+                                                        role.value}
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td className="px-3 py-3 text-xs font-medium text-[#64748b]">
+                                            {role.locked
+                                                ? t('status.locked')
+                                                : role.is_system
+                                                  ? t('status.system')
+                                                  : t('status.custom')}
+                                        </td>
+                                        <td className="px-3 py-3 font-semibold text-[#101828]">
+                                            {role.users_count}
+                                        </td>
+                                        <td className="px-3 py-3 text-[#64748b]">
+                                            {role.permissions_count}{' '}
+                                            {t('admin.roles.cols.permissions')}
+                                        </td>
+                                        <td className="px-3 py-3">
+                                            <div className="flex flex-wrap gap-2">
+                                                <Link
+                                                    href={`/admin/roles-permissions/${role.id}`}
+                                                    className="inline-flex h-9 items-center rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs font-semibold text-[#0057c8] hover:bg-[#f8faff]"
+                                                >
+                                                    {t('common.view')}
+                                                </Link>
+                                                {canManageAdmins &&
+                                                    role.editable && (
+                                                        <Link
+                                                            href={`/admin/roles-permissions/${role.id}/edit`}
+                                                            className="inline-flex h-9 items-center rounded-lg border border-[#e2e8f0] bg-white px-3 text-xs font-semibold text-[#101828] hover:bg-[#f8faff]"
+                                                        >
+                                                            {t('common.edit')}
+                                                        </Link>
+                                                    )}
+                                                {canManageAdmins &&
+                                                    role.can_delete && (
+                                                        <Form
+                                                            action={`/admin/roles-permissions/${role.id}`}
+                                                            method="delete"
+                                                        >
+                                                            {({
+                                                                processing,
+                                                            }) => (
+                                                                <button
+                                                                    type="submit"
+                                                                    disabled={
+                                                                        processing
+                                                                    }
+                                                                    className="inline-flex h-9 items-center rounded-lg border border-[#fecaca] bg-white px-3 text-xs font-semibold text-[#b91c1c] hover:bg-[#fef2f2]"
+                                                                >
+                                                                    {t(
+                                                                        'common.delete',
+                                                                    )}
+                                                                </button>
+                                                            )}
+                                                        </Form>
+                                                    )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <AdminPagination
+                        showingLabel={t('common.showing_range', {
+                            from: rolesPage.from ?? 0,
+                            to: rolesPage.to ?? 0,
+                            total: rolesPage.total,
+                        })}
+                        links={rolesPage.links}
+                    />
+                </div>
+
+                <div className="rounded-2xl border border-[#e2e8f0] bg-white p-5 shadow-[0px_1px_3px_rgba(0,0,0,0.06)]">
+                    <div className="mb-4 flex items-center gap-2">
+                        <AdminIcon
+                            src="/images/admin/nav-reports.svg"
+                            size={16}
+                            tint
+                            className="text-[#0057c8]"
+                        />
+                        <div>
+                            <h2 className="text-base font-bold text-[#101828]">
+                                {t('admin.roles.comparison_title')}
+                            </h2>
+                            <p className="text-xs text-[#99a1af]">
+                                {t('admin.roles.comparison_help')}
+                            </p>
+                        </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full text-left text-sm">
+                            <thead className="border-b border-[#e2e8f0] text-[#64748b]">
+                                <tr>
+                                    <th className="px-3 py-2 font-semibold">
+                                        {t('admin.roles.module')}
+                                    </th>
+                                    {roles.map((role) => (
+                                        <th
+                                            key={role.id}
+                                            className="px-3 py-2 font-semibold"
+                                        >
+                                            {role.label}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {permissionMatrix.map((row) => (
+                                    <tr
+                                        key={row.name}
+                                        className="border-b border-[#f1f5f9]"
+                                    >
+                                        <td className="px-3 py-3 font-medium text-[#101828]">
+                                            {row.label}
+                                        </td>
+                                        {roles.map((role) => (
+                                            <td
+                                                key={role.id}
+                                                className="px-3 py-3"
+                                            >
+                                                {row.roles[role.value] ? (
+                                                    <span className="inline-flex rounded-full bg-[#dcfce7] px-2.5 py-1 text-[11px] font-semibold text-[#15803d]">
+                                                        On
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex rounded-full bg-[#f1f5f9] px-2.5 py-1 text-[11px] font-semibold text-[#94a3b8]">
+                                                        Off
+                                                    </span>
+                                                )}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </AdminPortalLayout>
+    );
+}

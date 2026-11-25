@@ -1,0 +1,143 @@
+import { InertiaLinkProps } from '@inertiajs/react';
+import { LucideIcon } from 'lucide-react';
+
+export interface Auth {
+    user: User;
+    permissions?: string[];
+}
+
+export interface BreadcrumbItem {
+    title: string;
+    href: string;
+}
+
+export interface NavGroup {
+    title: string;
+    items: NavItem[];
+}
+
+export interface NavItem {
+    title: string;
+    href: NonNullable<InertiaLinkProps['href']>;
+    icon?: LucideIcon | string | null;
+    slug?: string;
+    isActive?: boolean;
+    children?: NavItem[];
+    permission?: string;
+    onClick?: (item: NavItem, event?: React.MouseEvent) => void;
+    badge?: string | number;
+    disabled?: boolean;
+    external?: boolean;
+    target?: '_blank' | '_self' | '_parent' | '_top';
+    className?: string;
+    description?: string;
+    [key: string]: unknown;
+}
+
+// Alias for backward compatibility
+export type NavItem = NavItem;
+
+export interface LocaleOption {
+    code: string;
+    label: string;
+    dir: 'ltr' | 'rtl';
+}
+
+export interface SharedData {
+    name: string;
+    auth: Auth;
+    features: Features;
+    flash: {
+        success?: boolean | string | null;
+        error?: boolean | string | null;
+    };
+    sidebarOpen: boolean;
+    locale: string;
+    dir: 'ltr' | 'rtl';
+    translations: Record<string, string>;
+    availableLocales: LocaleOption[];
+    unread_notifications?: number;
+    admin_nav_badges?: {
+        employers: number;
+        verifications: number;
+        jobs: number;
+        payments: number;
+        notifications: number;
+        contact_messages: number;
+    };
+    platform_social?: {
+        facebook_url?: string;
+        twitter_url?: string;
+        linkedin_url?: string;
+        instagram_url?: string;
+    };
+    platform_contact?: {
+        support_phone?: string | null;
+        support_phone_secondary?: string | null;
+        support_email?: string | null;
+        contact_email?: string | null;
+        company_address?: string | null;
+    };
+    ai_chat?: {
+        public_chat_enabled: boolean;
+        admin_assistant_enabled: boolean;
+    };
+    [key: string]: unknown;
+}
+
+export interface Features {
+    canRegister: boolean;
+    canResetPassword: boolean;
+    canVerifyEmail: boolean;
+    canUseTwoFactorAuthentication: boolean;
+}
+
+export interface User {
+    id: number;
+    name: string;
+    email: string;
+    company_name?: string | null;
+    contact_name?: string | null;
+    avatar?: string;
+    email_verified_at: string | null;
+    two_factor_enabled?: boolean;
+    permissions?: string[];
+    all_permissions?: string[];
+    roles?: string[];
+    created_at: string;
+    updated_at: string;
+    first_name?: string;
+    last_name?: string;
+    phone_number?: string;
+    employee_code?: string;
+    role?: number;
+    role_name?: string;
+    role_label?: string;
+    can_manage_users?: boolean;
+    can_manage_admins?: boolean;
+    is_employer_owner?: boolean;
+    avatar_url?: string;
+    headline?: string | null;
+    [key: string]: unknown;
+}
+
+export interface AdminUser {
+    id: number;
+    name: string;
+    email: string;
+}
+
+export interface NavItemProps {
+    item: NavItem;
+    isCollapsed: boolean;
+    level?: number;
+    isActive?: boolean;
+    currentRoute?: string;
+    permissions?: string[];
+    activeSlug?: string;
+}
+
+export interface DropdownPosition {
+    top: number;
+    left: number;
+}

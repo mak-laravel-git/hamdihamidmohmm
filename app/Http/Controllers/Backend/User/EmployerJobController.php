@@ -1,0 +1,537 @@
+<?php
+
+namespace App\Http\Controllers\Backend\User;
+
+use App\Enums\JobApplicationStatus;
+use App\Enums\JobPostStatus;
+use App\Enums\JobTaxonomyType;
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Backend\User\StoreEmployerJobRequest;
+use App\Http\Requests\Backend\User\UpdateEmployerJobRequest;
+use App\Http\Requests\Backend\User\UploadEmployerJobDescriptionAttachmentRequest;
+use App\Http\Requests\Backend\User\UploadEmployerJobLogoRequest;
+use App\Models\JobPost;
+use App\Models\JobTaxonomy;
+use App\Models\User;
+use App\Services\Ats\AtsJobQuality;
+use App\Services\Ats\AtsSettings;
+use App\Support\EmployerJobAccess;
+use App\Support\EmployerPlanSnapshot;
+use App\Support\JobListingQuery;
+use App\Support\ListPageSize;
+use App\Support\RecruitmentReport;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Str;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class EmployerJobController extends Controller
+{
+    /**
+     * @var list<string>
+     */
+    private const JOB_FILTERS = ['all', 'active', 'draft', 'expired', 'closed'];
+
+    public function index(Request $request): Response
+    {
+        $employer = $request->user();
+
+        abort_unless($employer !== null, 403);
+
+        $search = trim($request->string('search')->toString());
+        $filter = $request->string('filter')->toString();
+
+        if (! in_array($filter, self::JOB_FILTERS, true)) {
+            $filter = 'all';
+        }
+
+        $jobsQuery = EmployerJobAccess::constrainJobQuery(JobPost::query(), $employer)
+            ->with('employer:id,name,company_name,company_logo_path')
+            ->withCount([
+                'applications',
+                'applications as new_applications_count' => fn ($query) => $query->where('created_at', '>=', now()->subDays(7)),
+                'applications as shortlisted_applications_count' => fn ($query) => $query->where('status', JobApplicationStatus::Shortlisted),
+                'panelMembers as panel_members_count',
+            ])
+            ->latest();
+
+        $this->applyListFilter($jobsQuery, $filter);
+
+        if ($search !== '') {
+            $jobsQuery->where(function (Builder $query) use ($search): void {
+                $like = '%'.addcslashes($search, '\\%_').'%';
+
+                $query->where('title', 'like', $like)
+                    ->orWhere('category', 'like', $like)
+                    ->orWhere('location', 'like', $like);
+            });
+        }
+
+        $jobs = $jobsQuery
+            ->paginate(ListPageSize::DEFAULT)
+            ->withQueryString()
+            ->through(fn (JobPost $job): array => $this->listRow($job));
+
+        return Inertia::render('backend/User/EmployerJobs', [
+            'jobs' => $jobs,
+            'plan' => EmployerPlanSnapshot::for($employer),
+            'can_manage_panel' => EmployerJobAccess::canManagePanel($employer),
+            'stats' => $this->listStats($employer),
+            'filters' => [
+                'search' => $search,
+                'filter' => $filter,
+            ],
+        ]);
+    }
+
+    /**
+     * @param  Builder<JobPost>  $query
+     */
+    private function applyListFilter(Builder $query, string $filter): void
+    {
+        match ($filter) {
+            'active' => $query->active(),
+            'draft' => $query->whereIn('status', [JobPostStatus::Draft, JobPostStatus::Pending]),
+            'closed' => $query->where('status', JobPostStatus::Rejected),
+            'expired' => $query->where(function (Builder $expired): void {
+                $expired->where('status', JobPostStatus::Expired)
+                    ->orWhere(function (Builder $ended): void {
+                        $ended->where('status', JobPostStatus::Active)
+                            ->whereNotNull('expires_at')
+                            ->where('expires_at', '<', now()->startOfDay());
+                    });
+            }),
+            default => null,
+        };
+    }
+
+    /**
+     * @return array{total: int, active: int, draft: int, expired: int}
+     */
+    private function listStats(User $employer): array
+    {
+        $scoped = fn (): Builder => EmployerJobAccess::constrainJobQuery(JobPost::query(), $employer);
+
+        $total = $scoped()->count();
+        $active = $scoped()->active()->count();
+        $draft = $scoped()->whereIn('status', [JobPostStatus::Draft, JobPostStatus::Pending])->count();
+        $expired = $scoped()->tap(fn (Builder $query) => $this->applyListFilter($query, 'expired'))->count();
+
+        return [
+            'total' => $total,
+            'active' => $active,
+            'draft' => $draft,
+            'expired' => $expired,
+        ];
+    }
+
+    public function create(Request $request): Response
+    {
+        $employer = $request->user();
+
+        return Inertia::render('backend/User/EmployerJobEditor', [
+            'job' => null,
+            'plan' => $employer ? EmployerPlanSnapshot::for($employer) : null,
+            'company' => $employer ? $this->companySummary($employer) : null,
+            'organizationTypes' => JobTaxonomy::organizationTypeOptions(
+                $employer?->organization_type,
+            ),
+            'options' => $this->formOptions(),
+            'ats' => $this->atsFormProps($employer),
+        ]);
+    }
+
+    public function store(StoreEmployerJobRequest $request): RedirectResponse
+    {
+        $employer = $request->user();
+        abort_unless($employer !== null, 403);
+
+        $publish = $request->boolean('publish', true);
+
+        $creditError = $this->creditError($employer, $publish);
+
+        if ($creditError !== null) {
+            return back()->withErrors(['title' => $creditError]);
+        }
+
+        $job = JobPost::query()->create([
+            ...$request->safe()->except(['publish', 'featured', 'logo', 'employer_can_manage_apply']),
+            'employer_id' => $employer->employerAccountId(),
+            'featured' => false,
+            'employer_can_manage_apply' => true,
+            'status' => $publish ? JobPostStatus::Pending : JobPostStatus::Draft,
+            'expires_at' => $request->date('expires_at') ?? ($publish ? now()->addDays(30) : null),
+        ]);
+
+        $this->storeJobLogo($job, $request->file('logo'));
+
+        if (! $employer->isEmployerOwner()) {
+            EmployerJobAccess::assignMember($job, $employer, $employer);
+        }
+
+        return redirect()
+            ->route('employer.jobs')
+            ->with('success', $publish ? 'job_submitted' : 'draft_saved');
+    }
+
+    public function edit(Request $request, JobPost $job): Response
+    {
+        $this->authorizeJob($request, $job);
+
+        $employer = $request->user();
+
+        return Inertia::render('backend/User/EmployerJobEditor', [
+            'job' => [
+                'id' => $job->id,
+                'title' => $job->title,
+                'subtitle' => $job->subtitle,
+                'slug' => $job->slug,
+                'logo_url' => $job->logoUrl(),
+                'category' => $job->category,
+                'country' => $job->country,
+                'location' => $job->location,
+                'employment_type' => $job->employment_type,
+                'experience_level' => $job->experience_level,
+                'salary_range' => $job->salary_range,
+                'career_portal_url' => $job->career_portal_url,
+                'apply_by_link' => (bool) $job->apply_by_link,
+                'hide_on_site_apply' => (bool) $job->hide_on_site_apply,
+                'employer_can_manage_apply' => (bool) $job->employer_can_manage_apply,
+                'description' => $job->description,
+                'requirements' => $job->requirements,
+                'skills' => $job->skills ?? [],
+                'application_questions' => $job->application_questions ?? [],
+                'expires_at' => $job->expires_at?->toDateString(),
+                'status' => $job->effectiveStatus()->value,
+            ],
+            'ats' => $this->atsFormProps($employer, $job),
+            'plan' => $employer ? EmployerPlanSnapshot::for($employer) : null,
+            'company' => $employer ? $this->companySummary($employer) : null,
+            'organizationTypes' => JobTaxonomy::organizationTypeOptions(
+                $employer?->organization_type,
+            ),
+            'options' => $this->formOptions($job),
+        ]);
+    }
+
+    public function update(UpdateEmployerJobRequest $request, JobPost $job): RedirectResponse
+    {
+        $employer = $request->user();
+        abort_unless($employer !== null, 403);
+
+        $publish = $request->boolean('publish', $job->status !== JobPostStatus::Draft);
+
+        $creditError = $this->creditError(
+            $employer,
+            $publish && $job->status === JobPostStatus::Draft,
+        );
+
+        if ($creditError !== null) {
+            return back()->withErrors(['title' => $creditError]);
+        }
+
+        $except = ['publish', 'featured', 'logo', 'employer_can_manage_apply'];
+
+        if (! $job->employer_can_manage_apply) {
+            $except = [
+                ...$except,
+                'career_portal_url',
+                'apply_by_link',
+                'hide_on_site_apply',
+            ];
+        }
+
+        $job->update([
+            ...$request->safe()->except($except),
+            'featured' => false,
+        ]);
+
+        $this->storeJobLogo($job, $request->file('logo'));
+
+        $submittedForReview = false;
+
+        if ($publish && in_array($job->status, [JobPostStatus::Draft, JobPostStatus::Rejected], true)) {
+            $job->forceFill([
+                'status' => JobPostStatus::Pending,
+                'rejection_reason' => null,
+                'expires_at' => $job->expires_at ?? now()->addDays(30),
+            ])->save();
+            $submittedForReview = true;
+        }
+
+        return redirect()
+            ->route('employer.jobs')
+            ->with('success', $submittedForReview ? 'job_submitted' : 'Job updated.');
+    }
+
+    public function uploadLogo(UploadEmployerJobLogoRequest $request, JobPost $job): RedirectResponse
+    {
+        $this->authorizeJob($request, $job);
+        $this->storeJobLogo($job, $request->file('logo'));
+
+        return back()->with('success', 'Job logo updated.');
+    }
+
+    public function destroyLogo(Request $request, JobPost $job): RedirectResponse
+    {
+        $this->authorizeJob($request, $job);
+
+        $job->deleteLogoFile();
+        $job->forceFill(['logo_path' => null])->save();
+
+        return back()->with('success', 'Job logo removed.');
+    }
+
+    public function duplicate(Request $request, JobPost $job): RedirectResponse
+    {
+        $this->authorizeJob($request, $job);
+
+        $copy = $job->replicate(['slug', 'views', 'rejection_reason', 'expires_at']);
+        $copy->forceFill([
+            'title' => $job->title.' (Copy)',
+            'slug' => Str::slug($job->title).'-'.Str::lower(Str::random(6)),
+            'status' => JobPostStatus::Draft,
+            'featured' => false,
+            'views' => 0,
+            'expires_at' => null,
+        ])->save();
+
+        return redirect()
+            ->route('employer.jobs.edit', $copy)
+            ->with('success', 'Job duplicated as a draft.');
+    }
+
+    public function uploadDescriptionAttachment(UploadEmployerJobDescriptionAttachmentRequest $request): JsonResponse
+    {
+        $employer = $request->user();
+        $file = $request->file('file');
+
+        abort_unless($employer !== null && $file !== null, 422);
+
+        $path = $file->store('job-description-attachments/'.$employer->id, 'public');
+
+        return response()->json([
+            'url' => '/storage/'.$path,
+            'name' => $file->getClientOriginalName(),
+        ]);
+    }
+
+    public function pause(Request $request, JobPost $job): RedirectResponse
+    {
+        $this->authorizeJob($request, $job);
+
+        abort_unless($job->effectiveStatus() === JobPostStatus::Active, 422);
+
+        $job->forceFill(['status' => JobPostStatus::Draft])->save();
+
+        return back()->with('success', 'Job paused.');
+    }
+
+    public function publish(Request $request, JobPost $job): RedirectResponse
+    {
+        $this->authorizeJob($request, $job);
+
+        $employer = $request->user();
+        abort_unless($employer !== null, 403);
+
+        $creditError = $this->creditError($employer, true, false);
+
+        if ($creditError !== null) {
+            return back()->withErrors(['title' => $creditError]);
+        }
+
+        $job->forceFill([
+            'status' => JobPostStatus::Pending,
+            'rejection_reason' => null,
+            'expires_at' => $job->expires_at ?? now()->addDays(30),
+        ])->save();
+
+        return back()->with('success', 'job_submitted');
+    }
+
+    public function destroy(Request $request, JobPost $job): RedirectResponse
+    {
+        $this->authorizeJob($request, $job);
+
+        $job->delete();
+
+        return back()->with('success', 'Job deleted.');
+    }
+
+    /**
+     * @return array{
+     *     id: int,
+     *     slug: string,
+     *     title: string,
+     *     logo_url: string|null,
+     *     category: string|null,
+     *     location: string|null,
+     *     type: string|null,
+     *     salary_range: string|null,
+     *     status: string,
+     *     status_value: string,
+     *     applications: int,
+     *     new_applications: int,
+     *     views: int,
+     *     expires_at: string|null,
+     *     created_at: string|null
+     * }
+     */
+    private function listRow(JobPost $job): array
+    {
+        return [
+            'id' => $job->id,
+            'reference' => RecruitmentReport::jobReference($job),
+            'slug' => $job->slug,
+            'title' => $job->title,
+            'logo_url' => $job->listingLogoUrl(),
+            'category' => JobListingQuery::displayLabel(JobTaxonomyType::PositionArea, $job->category),
+            'country' => JobListingQuery::displayLabel(JobTaxonomyType::Country, $job->country),
+            'location' => JobListingQuery::displayLabel(JobTaxonomyType::DutyStation, $job->location),
+            'type' => JobListingQuery::displayLabel(JobTaxonomyType::EmploymentType, $job->employment_type),
+            'salary_range' => $job->salary_range,
+            'status' => $job->effectiveStatus()->label(),
+            'status_value' => $job->effectiveStatus()->value,
+            'applications' => (int) $job->applications_count,
+            'new_applications' => (int) $job->new_applications_count,
+            'shortlisted' => (int) $job->shortlisted_applications_count,
+            'panel_members_count' => (int) ($job->panel_members_count ?? 0),
+            'views' => (int) $job->views,
+            'expires_at' => $job->expires_at?->format('j F Y'),
+            'created_at' => $job->created_at?->format('d-m-y'),
+        ];
+    }
+
+    /**
+     * @return array{
+     *     countries: list<array{value: string, label: string}>,
+     *     dutyStations: list<array{value: string, label: string}>,
+     *     positionAreas: list<array{value: string, label: string}>,
+     *     employmentTypes: list<array{value: string, label: string}>,
+     *     experienceLevels: list<array{value: string, label: string}>,
+     *     organizationTypes: list<array{value: string, label: string}>
+     * }
+     */
+    private function formOptions(?JobPost $job = null): array
+    {
+        $options = JobTaxonomy::filterOptions();
+
+        if ($job !== null) {
+            $options['positionAreas'] = JobTaxonomy::withCurrentOption(
+                $options['positionAreas'],
+                $job->category,
+                JobTaxonomyType::PositionArea,
+            );
+            $options['dutyStations'] = JobTaxonomy::withCurrentOption(
+                $options['dutyStations'],
+                $job->location,
+                JobTaxonomyType::DutyStation,
+            );
+            $options['countries'] = JobTaxonomy::withCurrentOption(
+                $options['countries'],
+                $job->country,
+                JobTaxonomyType::Country,
+            );
+            $options['employmentTypes'] = JobTaxonomy::withCurrentOption(
+                $options['employmentTypes'],
+                $job->employment_type,
+                JobTaxonomyType::EmploymentType,
+            );
+            $options['experienceLevels'] = JobTaxonomy::withCurrentOption(
+                $options['experienceLevels'],
+                $job->experience_level,
+                JobTaxonomyType::ExperienceLevel,
+            );
+        }
+
+        return $options;
+    }
+
+    /**
+     * @return array{
+     *     name: string,
+     *     industry: string|null,
+     *     about: string|null,
+     *     website: string|null,
+     *     initials: string,
+     *     logo_url: string|null
+     * }
+     */
+    private function companySummary(User $employer): array
+    {
+        $name = (string) ($employer->company_name ?: $employer->name ?: 'Organization');
+
+        return [
+            'name' => $name,
+            'organization_type' => filled($employer->organization_type)
+                ? (string) $employer->organization_type
+                : 'private_company',
+            'industry' => $employer->industry,
+            'about' => $employer->about,
+            'website' => $employer->website,
+            'initials' => collect(explode(' ', $name))
+                ->filter()
+                ->take(2)
+                ->map(fn (string $part): string => Str::upper(Str::substr($part, 0, 1)))
+                ->implode(''),
+            'logo_url' => $employer->companyLogoUrl(),
+        ];
+    }
+
+    private function storeJobLogo(JobPost $job, ?UploadedFile $logo): void
+    {
+        if ($logo === null) {
+            return;
+        }
+
+        $job->deleteLogoFile();
+
+        $path = $logo->store('job-logos/'.$job->employer_id, 'public');
+
+        $job->forceFill([
+            'logo_path' => $path,
+        ])->save();
+    }
+
+    private function authorizeJob(Request $request, JobPost $job): void
+    {
+        $user = $request->user();
+        abort_unless($user !== null && EmployerJobAccess::canAccessJob($user, $job), 403);
+    }
+
+    private function creditError(User $employer, bool $needsJobCredit): ?string
+    {
+        $plan = EmployerPlanSnapshot::for($employer);
+
+        if ($needsJobCredit && ! $plan['can_post_job']) {
+            return 'You have no job credits remaining. Upgrade your plan to post more jobs.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Soft ATS quality hints for the job editor. Never blocks publishing.
+     *
+     * @return array{enabled: bool, quality: array{missing_skills: bool, thin_description: bool, show: bool}}
+     */
+    private function atsFormProps(?User $employer, ?JobPost $job = null): array
+    {
+        $enabled = app(AtsSettings::class)->enabledForEmployer($employer);
+
+        return [
+            'enabled' => $enabled,
+            'quality' => $enabled
+                ? AtsJobQuality::hints(
+                    $job?->skills,
+                    $job?->requirements,
+                    $job?->description,
+                )
+                : ['missing_skills' => false, 'thin_description' => false, 'show' => false],
+        ];
+    }
+}

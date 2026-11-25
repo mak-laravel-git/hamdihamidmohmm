@@ -1,0 +1,969 @@
+import { Head, Link, router, usePage } from '@inertiajs/react';
+import { BriefcaseBusiness, UserRoundPen } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+
+import { AboutCompanyCard } from '@/components/employer/about-company-card';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import { RichTextContent } from '@/components/ui/rich-text-editor';
+import { useLocale } from '@/hooks/use-locale';
+import FrontendLayout from '@/layouts/frontend-layout';
+import { jobs as jobsRoute, login } from '@/routes';
+import { apply as applyToJob, show as jobShow } from '@/routes/jobs';
+import type { SharedData } from '@/types';
+
+type SimilarJob = {
+    slug: string;
+    initials: string;
+    logo_url?: string | null;
+    title: string;
+    company: string | null;
+};
+
+type JobDetail = {
+    id?: number;
+    slug: string;
+    initials?: string;
+    title: string;
+    subtitle?: string | null;
+    logo_url?: string | null;
+    company: string | null;
+    company_logo_url?: string | null;
+    company_industry?: string | null;
+    company_about?: string | null;
+    company_website?: string | null;
+    type?: string | null;
+    category?: string | null;
+    location?: string | null;
+    experience?: string | null;
+    salary?: string | null;
+    career_portal_url?: string | null;
+    apply_by_link?: boolean;
+    hide_on_site_apply?: boolean;
+    posted?: string | null;
+    deadline?: string | null;
+    vacancies?: string | null;
+    industry?: string | null;
+    overview?: string | null;
+    description?: string | null;
+    responsibilities?: string[];
+    requirements?: string | null;
+    skills?: string[];
+    application_questions?: Array<{
+        id: string;
+        prompt: string;
+        type: 'text' | 'textarea' | 'yes_no';
+        required: boolean;
+        sort?: number;
+    }>;
+    benefits?: string[];
+    similar?: SimilarJob[];
+};
+
+type ApplicantCv = {
+    id: number;
+    label: string;
+    file_name: string | null;
+    is_default: boolean;
+};
+
+export default function JobShow({
+    job,
+    applied = false,
+    can_apply = false,
+    is_preview = false,
+    applicant_cvs = [],
+}: {
+    job: JobDetail;
+    applied?: boolean;
+    can_apply?: boolean;
+    is_preview?: boolean;
+    applicant_cvs?: ApplicantCv[];
+}) {
+    const { t } = useLocale();
+    const { auth } = usePage<SharedData>().props;
+    const [shareOpen, setShareOpen] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const [applyModalOpen, setApplyModalOpen] = useState(false);
+    const [applying, setApplying] = useState(false);
+    const [coverLetter, setCoverLetter] = useState('');
+    const [coverLetterError, setCoverLetterError] = useState<string | null>(
+        null,
+    );
+    const [questionAnswers, setQuestionAnswers] = useState<
+        Record<string, string>
+    >({});
+    const [questionErrors, setQuestionErrors] = useState<
+        Record<string, string>
+    >({});
+    const [cvError, setCvError] = useState<string | null>(null);
+    const defaultCvId =
+        applicant_cvs.find((cv) => cv.is_default)?.id ??
+        applicant_cvs[0]?.id ??
+        null;
+    const [selectedCvId, setSelectedCvId] = useState<number | null>(defaultCvId);
+    const shareRef = useRef<HTMLDivElement>(null);
+
+    const pageUrl =
+        typeof window !== 'undefined' ? window.location.href : jobShow.url(job.slug);
+
+    useEffect(() => {
+        if (!shareOpen) {
+            return;
+        }
+
+        const handleClick = (event: MouseEvent) => {
+            if (
+                shareRef.current &&
+                !shareRef.current.contains(event.target as Node)
+            ) {
+                setShareOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClick);
+
+        return () => document.removeEventListener('mousedown', handleClick);
+    }, [shareOpen]);
+
+    const applyHref = auth.user ? '/dashboard' : login.url();
+    const profileHref = '/job-seeker/profile';
+    const overview = job.overview || job.description || '';
+    const similar = job.similar ?? [];
+    const responsibilities = job.responsibilities ?? [];
+    const requirements = job.requirements?.trim() ? job.requirements : null;
+    const skills = job.skills ?? [];
+    const applicationQuestions = job.application_questions ?? [];
+    const benefits = job.benefits ?? [];
+    const showApplyByLink = Boolean(
+        !is_preview && job.apply_by_link && job.career_portal_url,
+    );
+    const showApplyNow = !Boolean(job.hide_on_site_apply);
+    const applyByLinkIsEmail = Boolean(
+        job.career_portal_url &&
+            job.career_portal_url.includes('@') &&
+            !/^https?:\/\//i.test(job.career_portal_url),
+    );
+    const applyByLinkHref = applyByLinkIsEmail
+        ? `mailto:${job.career_portal_url}`
+        : (job.career_portal_url ?? undefined);
+
+    useEffect(() => {
+        setSelectedCvId(defaultCvId);
+    }, [defaultCvId]);
+
+    const confirmApply = (): void => {
+        if (applying) {
+            return;
+        }
+
+        if (applicant_cvs.length > 1 && !selectedCvId) {
+            setCvError(t('job_detail.cv_required'));
+
+            return;
+        }
+
+        setCoverLetterError(null);
+        setQuestionErrors({});
+        setCvError(null);
+        setApplying(true);
+        router.post(
+            job.id ? applyToJob.url(job.id) : `/jobs/${job.slug}/apply`,
+            {
+                cover_letter: coverLetter.trim() || null,
+                question_answers: questionAnswers,
+                ...(selectedCvId ? { cv_id: selectedCvId } : {}),
+            },
+            {
+                onFinish: () => setApplying(false),
+                onError: (errors) => {
+                    setApplying(false);
+                    if (errors.cover_letter) {
+                        setCoverLetterError(errors.cover_letter);
+                    }
+                    if (errors.cv_id) {
+                        setCvError(errors.cv_id);
+                    }
+
+                    const nextQuestionErrors: Record<string, string> = {};
+
+                    for (const [key, message] of Object.entries(errors)) {
+                        if (key.startsWith('question_answers.')) {
+                            nextQuestionErrors[key.replace('question_answers.', '')] =
+                                message;
+                        }
+                    }
+
+                    setQuestionErrors(nextQuestionErrors);
+                },
+                onSuccess: () => {
+                    setCoverLetter('');
+                    setQuestionAnswers({});
+                    setApplyModalOpen(false);
+                },
+            },
+        );
+    };
+
+    const goToProfile = (): void => {
+        setApplyModalOpen(false);
+        router.visit(profileHref);
+    };
+
+    const shareItems = [
+        {
+            key: 'copy',
+            label: t('job_detail.share_copy'),
+            icon: '/images/job-detail/copy-link.svg',
+            onClick: async () => {
+                try {
+                    await navigator.clipboard.writeText(pageUrl);
+                    setCopied(true);
+                    window.setTimeout(() => setCopied(false), 2000);
+                } catch {
+                    setCopied(false);
+                }
+            },
+        },
+        {
+            key: 'linkedin',
+            label: t('job_detail.share_linkedin'),
+            emoji: '💼',
+            href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(pageUrl)}`,
+        },
+        {
+            key: 'twitter',
+            label: t('job_detail.share_twitter'),
+            emoji: '𝕏',
+            href: `https://twitter.com/intent/tweet?url=${encodeURIComponent(pageUrl)}&text=${encodeURIComponent(job.title)}`,
+        },
+        {
+            key: 'facebook',
+            label: t('job_detail.share_facebook'),
+            emoji: 'f',
+            href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(pageUrl)}`,
+        },
+        {
+            key: 'email',
+            label: t('job_detail.share_email'),
+            emoji: '✉️',
+            href: `mailto:?subject=${encodeURIComponent(job.title)}&body=${encodeURIComponent(pageUrl)}`,
+        },
+    ];
+
+    const metaItems = [
+        { label: t('job_detail.posted'), value: job.posted },
+        { label: t('job_detail.deadline'), value: job.deadline },
+        { label: t('job_detail.experience'), value: job.experience },
+        { label: t('job_detail.job_type'), value: job.type },
+        { label: t('job_detail.category'), value: job.category },
+        { label: t('job_detail.salary'), value: job.salary },
+        { label: t('job_detail.location'), value: job.location },
+        { label: t('job_detail.vacancies'), value: job.vacancies },
+        { label: t('job_detail.industry'), value: job.industry },
+    ].filter((item) => Boolean(item.value));
+
+    return (
+        <FrontendLayout>
+            <Head title={`${job.title} - ${t('app.name')}`} />
+
+            <section className="bg-[#d1f6ff] px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
+                <div className="mx-auto max-w-[1280px]">
+                    <nav className="flex flex-wrap items-center gap-2 text-sm">
+                        <Link
+                            href={jobsRoute()}
+                            className="text-[#050315] transition hover:text-[#0057c8]"
+                        >
+                            {t('nav.jobs')}
+                        </Link>
+                        <img
+                            src="/images/job-detail/breadcrumb-chevron.svg"
+                            alt=""
+                            className="size-4 rtl:rotate-180"
+                            width={16}
+                            height={16}
+                        />
+                        <span className="text-[#3977a6]">{job.title}</span>
+                    </nav>
+                </div>
+            </section>
+
+            <section className="bg-white px-4 py-5 sm:px-6 lg:px-8">
+                <div className="mx-auto max-w-[1280px]">
+                    <div className="grid gap-6 lg:grid-cols-[1fr_390px]">
+                        <div>
+                            <Link
+                                href={jobsRoute()}
+                                className="mb-3 inline-flex items-center gap-2 text-sm font-medium text-[#0057c8] transition hover:underline"
+                            >
+                                <img
+                                    src="/images/job-detail/back-arrow.svg"
+                                    alt=""
+                                    className="size-4 rtl:rotate-180"
+                                    width={16}
+                                    height={16}
+                                />
+                                {t('job_detail.back')}
+                            </Link>
+
+                            <article className="rounded-2xl border border-[#e2e8f0] bg-white p-6 shadow-[0px_1px_1.5px_rgba(0,0,0,0.06)] sm:p-7">
+                                <div className="flex items-start gap-4">
+                                    <div className="flex size-[80px] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white text-base font-bold text-[#0057c8] sm:size-[88px]">
+                                        {job.logo_url ? (
+                                            <img
+                                                src={job.logo_url}
+                                                alt={job.title}
+                                                className="size-full object-contain object-center p-0.5"
+                                            />
+                                        ) : (
+                                            job.initials || 'JP'
+                                        )}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <h1 className="text-2xl font-bold text-[#050315]">
+                                                    {job.title}
+                                                </h1>
+                                                {is_preview ? (
+                                                    <p className="mt-2 inline-flex rounded-full bg-[#fff7ed] px-2.5 py-0.5 text-xs font-semibold text-[#c2410c]">
+                                                        {t('job_detail.preview_notice')}
+                                                    </p>
+                                                ) : null}
+                                                <p className="mt-1.5 text-base font-normal text-[#64748b]">
+                                                    {job.subtitle || job.company}
+                                                </p>
+                                                {job.subtitle && job.company ? (
+                                                    <p className="mt-1 text-sm text-[#4a5565]">
+                                                        {job.company}
+                                                    </p>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-5 flex flex-wrap gap-2">
+                                    {job.type ? (
+                                        <span className="rounded-full bg-[#dcfce7] px-2.5 py-0.5 text-xs font-semibold text-[#16a34a]">
+                                            {job.type}
+                                        </span>
+                                    ) : null}
+                                    {job.category ? (
+                                        <span className="rounded-full bg-[#eef5ff] px-2.5 py-0.5 text-xs font-semibold text-[#0057c8]">
+                                            {job.category}
+                                        </span>
+                                    ) : null}
+                                    {job.location ? (
+                                        <span className="rounded-full bg-[#f1f5f9] px-2.5 py-0.5 text-xs font-semibold text-[#475569]">
+                                            📍 {job.location}
+                                        </span>
+                                    ) : null}
+                                    {job.experience ? (
+                                        <span className="rounded-full bg-[#f1f5f9] px-2.5 py-0.5 text-xs font-semibold text-[#475569]">
+                                            💼 {job.experience}
+                                        </span>
+                                    ) : null}
+                                    {job.salary ? (
+                                        <span className="rounded-full bg-[#f1f5f9] px-2.5 py-0.5 text-xs font-semibold text-[#475569]">
+                                            💰 {job.salary}
+                                        </span>
+                                    ) : null}
+                                </div>
+
+                                {metaItems.length > 0 ? (
+                                    <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-[#f1f5f9] pt-5 sm:grid-cols-4">
+                                        {metaItems.map((item) => (
+                                            <div key={item.label}>
+                                                <p className="text-xs text-[#99a1af]">
+                                                    {item.label}
+                                                </p>
+                                                <p className="mt-1 text-sm font-semibold text-[#050315]">
+                                                    {item.value}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </article>
+
+                            <article className="mt-5 rounded-2xl border border-[#e2e8f0] bg-white p-6 shadow-[0px_1px_1.5px_rgba(0,0,0,0.06)] sm:p-7">
+                                {overview ? (
+                                    <section>
+                                        <h2 className="text-lg font-bold text-[#050315]">
+                                            {t('job_detail.overview')}
+                                        </h2>
+                                        <div className="mt-3 min-w-0 max-w-full text-sm leading-[23px] text-[#4a5565]">
+                                            <RichTextContent html={overview} />
+                                        </div>
+                                    </section>
+                                ) : null}
+
+                                {responsibilities.length > 0 ? (
+                                    <section className="mt-8">
+                                        <h2 className="text-lg font-bold text-[#050315]">
+                                            {t('job_detail.responsibilities')}
+                                        </h2>
+                                        <ul className="mt-4 space-y-3">
+                                            {responsibilities.map((item) => (
+                                                <li
+                                                    key={item}
+                                                    className="flex items-start gap-3 text-sm text-[#364153]"
+                                                >
+                                                    <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[#eff6ff]">
+                                                        <img
+                                                            src="/images/job-detail/check-blue.svg"
+                                                            alt=""
+                                                            className="size-3"
+                                                            width={12}
+                                                            height={12}
+                                                        />
+                                                    </span>
+                                                    {item}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </section>
+                                ) : null}
+
+                                {requirements ? (
+                                    <section className="mt-8">
+                                        <h2 className="text-lg font-bold text-[#050315]">
+                                            {t('job_detail.requirements')}
+                                        </h2>
+                                        <div className="mt-4 min-w-0 max-w-full text-sm leading-[23px] text-[#4a5565]">
+                                            <RichTextContent
+                                                html={requirements}
+                                            />
+                                        </div>
+                                    </section>
+                                ) : null}
+
+                                {skills.length > 0 ? (
+                                    <section className="mt-8">
+                                        <h2 className="text-lg font-bold text-[#050315]">
+                                            {t('job_detail.skills')}
+                                        </h2>
+                                        <div className="mt-4 flex flex-wrap gap-2">
+                                            {skills.map((skill) => (
+                                                <span
+                                                    key={skill}
+                                                    className="inline-flex rounded-full bg-[#eef5ff] px-3 py-1.5 text-xs font-semibold text-[#0057c8]"
+                                                >
+                                                    {skill}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </section>
+                                ) : null}
+
+                                {benefits.length > 0 ? (
+                                    <section className="mt-8">
+                                        <h2 className="text-lg font-bold text-[#050315]">
+                                            {t('job_detail.benefits')}
+                                        </h2>
+                                        <div className="mt-4 flex flex-wrap gap-2">
+                                            {benefits.map((benefit) => (
+                                                <span
+                                                    key={benefit}
+                                                    className="inline-flex items-center gap-1.5 rounded-full border border-[#bbf7d0] bg-[#f0fdf4] px-3 py-1.5 text-xs font-semibold text-[#15803d]"
+                                                >
+                                                    ✓ {benefit}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </section>
+                                ) : null}
+
+                                <div className="relative mt-8 flex flex-wrap items-center gap-3 border-t border-[#e5e7eb] pt-5">
+                                    {is_preview ? (
+                                        <span className="inline-flex h-12 min-w-0 flex-1 items-center justify-center rounded-full bg-[#fff7ed] px-6 text-sm font-bold text-[#c2410c]">
+                                            {t('job_detail.preview_notice')}
+                                        </span>
+                                    ) : showApplyNow ? (
+                                        can_apply ? (
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    setApplyModalOpen(true)
+                                                }
+                                                className="inline-flex h-12 min-w-0 flex-1 items-center justify-center rounded-full bg-[#0057c8] px-6 text-sm font-bold text-white transition hover:bg-[#0046a3]"
+                                            >
+                                                {t('job_detail.apply_now')}
+                                            </button>
+                                        ) : applied ? (
+                                            <span className="inline-flex h-12 min-w-0 flex-1 items-center justify-center rounded-full bg-[#e2e8f0] px-6 text-sm font-bold text-[#64748b]">
+                                                {t(
+                                                    'job_seeker.dashboard.applied',
+                                                )}
+                                            </span>
+                                        ) : (
+                                            <Link
+                                                href={applyHref}
+                                                className="inline-flex h-12 min-w-0 flex-1 items-center justify-center rounded-full bg-[#0057c8] px-6 text-sm font-bold text-white transition hover:bg-[#0046a3]"
+                                            >
+                                                {t('job_detail.apply_now')}
+                                            </Link>
+                                        )
+                                    ) : null}
+
+                                    {showApplyByLink && applyByLinkHref ? (
+                                        <a
+                                            href={applyByLinkHref}
+                                            {...(applyByLinkIsEmail
+                                                ? {}
+                                                : {
+                                                      target: '_blank',
+                                                      rel: 'noopener noreferrer',
+                                                  })}
+                                            className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-full border-2 border-[#0057c8] bg-white px-5 text-sm font-semibold text-[#0057c8] transition hover:bg-[#eef5ff]"
+                                        >
+                                            {t(
+                                                applyByLinkIsEmail
+                                                    ? 'job_detail.apply_by_email'
+                                                    : 'job_detail.apply_by_link',
+                                            )}
+                                        </a>
+                                    ) : null}
+
+                                    <div className="relative shrink-0" ref={shareRef}>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShareOpen((open) => !open)}
+                                            className="inline-flex h-12 items-center justify-center gap-2 rounded-full border-2 border-[#0057c8] bg-white px-5 text-sm font-semibold text-[#0057c8] transition hover:bg-[#eef5ff]"
+                                        >
+                                            <img
+                                                src="/images/job-detail/share.svg"
+                                                alt=""
+                                                className="size-4"
+                                                width={16}
+                                                height={16}
+                                            />
+                                            {t('job_detail.share')}
+                                        </button>
+
+                                        {shareOpen && (
+                                            <div className="absolute bottom-[56px] end-0 z-20 w-48 rounded-xl border border-[#e2e8f0] bg-white p-4 shadow-[0px_8px_24px_rgba(0,0,0,0.08)]">
+                                                <p className="text-xs font-medium text-[#6a7282]">
+                                                    {t('job_detail.share_via')}
+                                                </p>
+                                                <div className="mt-3 space-y-1">
+                                                    {shareItems.map((item) =>
+                                                        item.onClick ? (
+                                                            <button
+                                                                key={item.key}
+                                                                type="button"
+                                                                onClick={item.onClick}
+                                                                className="flex w-full items-center gap-3 rounded-lg px-1 py-2 text-sm text-[#364153] transition hover:bg-[#f8faff]"
+                                                            >
+                                                                {item.icon ? (
+                                                                    <img
+                                                                        src={item.icon}
+                                                                        alt=""
+                                                                        className="size-4"
+                                                                        width={16}
+                                                                        height={16}
+                                                                    />
+                                                                ) : (
+                                                                    <span className="inline-flex size-4 items-center justify-center text-xs">
+                                                                        {item.emoji}
+                                                                    </span>
+                                                                )}
+                                                                {copied && item.key === 'copy'
+                                                                    ? t('job_detail.link_copied')
+                                                                    : item.label}
+                                                            </button>
+                                                        ) : (
+                                                            <a
+                                                                key={item.key}
+                                                                href={item.href}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="flex items-center gap-3 rounded-lg px-1 py-2 text-sm text-[#364153] transition hover:bg-[#f8faff]"
+                                                            >
+                                                                <span className="inline-flex size-4 items-center justify-center text-xs font-semibold">
+                                                                    {item.emoji}
+                                                                </span>
+                                                                {item.label}
+                                                            </a>
+                                                        ),
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </article>
+                        </div>
+
+                        <aside className="space-y-5">
+                            <div>
+                                <AboutCompanyCard
+                                    title={t('job_detail.about_company')}
+                                    companyName={
+                                        job.company ||
+                                        t('employer.profile.company_fallback')
+                                    }
+                                    industry={job.company_industry}
+                                    about={job.company_about}
+                                    website={job.company_website}
+                                    logoUrl={job.company_logo_url}
+                                    initials={job.initials || 'JP'}
+                                    visitWebsiteLabel={t(
+                                        'job_detail.visit_website',
+                                    )}
+                                />
+
+                                {!auth.user && (
+                                    <div className="mt-5 rounded-xl bg-[#eff6ff] p-4">
+                                        <p className="text-xs text-[#364153]">
+                                            {t('job_detail.login_prompt')}
+                                        </p>
+                                        <Link
+                                            href={login()}
+                                            className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-full bg-[#0057c8] text-sm font-semibold text-white transition hover:bg-[#0046a3]"
+                                        >
+                                            {t('auth.log_in')}
+                                        </Link>
+                                    </div>
+                                )}
+                            </div>
+
+                            <article className="rounded-2xl border border-[#e2e8f0] bg-white p-5 shadow-[0px_1px_1.5px_rgba(0,0,0,0.06)]">
+                                <h2 className="text-lg font-bold text-[#050315]">
+                                    {t('job_detail.similar')}
+                                </h2>
+                                <div className="mt-4 space-y-3">
+                                    {similar.map((item) => (
+                                        <Link
+                                            key={item.slug}
+                                            href={jobShow.url(item.slug)}
+                                            className="flex items-center gap-3 rounded-xl border border-[#f1f5f9] p-3 transition hover:border-[#dbeafe] hover:bg-[#f8faff]"
+                                        >
+                                            {item.logo_url ? (
+                                                <div className="flex size-[64px] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white">
+                                                    <img
+                                                        src={item.logo_url}
+                                                        alt={item.company || item.title}
+                                                        className="size-full object-contain object-center p-0.5"
+                                                    />
+                                                </div>
+                                            ) : (
+                                                <div
+                                                    className="flex size-[72px] shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white"
+                                                    style={{
+                                                        backgroundImage:
+                                                            'linear-gradient(135deg, rgb(30, 58, 138) 0%, rgb(37, 99, 235) 100%)',
+                                                    }}
+                                                >
+                                                    {item.initials}
+                                                </div>
+                                            )}
+                                            <div className="min-w-0">
+                                                <p className="truncate text-sm font-semibold text-[#050315]">
+                                                    {item.title}
+                                                </p>
+                                                <p className="truncate text-xs text-[#6a7282]">
+                                                    {item.company}
+                                                </p>
+                                            </div>
+                                        </Link>
+                                    ))}
+                                </div>
+                            </article>
+                        </aside>
+                    </div>
+                </div>
+            </section>
+
+            <Dialog
+                open={applyModalOpen}
+                onOpenChange={(open) => {
+                    setApplyModalOpen(open);
+                    if (!open) {
+                        setCoverLetterError(null);
+                        setCvError(null);
+                    } else {
+                        setSelectedCvId(defaultCvId);
+                    }
+                }}
+            >
+                <DialogContent className="max-w-[440px] overflow-hidden rounded-3xl border-[#dbeafe] bg-white p-0 shadow-[0_24px_60px_rgba(5,3,21,0.18)] sm:max-w-[440px]">
+                    <div className="relative overflow-hidden bg-gradient-to-br from-[#eef5ff] via-white to-[#f8fbff] px-6 pb-5 pt-8 sm:px-7">
+                        <div
+                            aria-hidden
+                            className="pointer-events-none absolute -end-10 -top-10 size-32 rounded-full bg-[#0057c8]/10 blur-2xl"
+                        />
+                        <div
+                            aria-hidden
+                            className="pointer-events-none absolute -start-8 bottom-0 size-24 rounded-full bg-[#38bdf8]/15 blur-2xl"
+                        />
+                        <DialogHeader className="relative items-center gap-3 text-center sm:text-center">
+                            <div className="flex size-14 items-center justify-center rounded-2xl bg-[#0057c8] text-white shadow-[0_10px_24px_rgba(0,87,200,0.28)]">
+                                <BriefcaseBusiness
+                                    className="size-7"
+                                    strokeWidth={2.2}
+                                />
+                            </div>
+                            <DialogTitle className="text-[22px] font-bold tracking-[-0.3px] text-[#050315]">
+                                {t('job_detail.apply_confirm_title')}
+                            </DialogTitle>
+                            <DialogDescription className="max-w-[320px] text-sm leading-6 text-[#64748b]">
+                                {t('job_detail.apply_final_step')}
+                            </DialogDescription>
+                            <div className="mt-1 w-full rounded-2xl border border-[#dbeafe] bg-white/90 px-4 py-3 text-start">
+                                <p className="text-sm font-bold text-[#050315]">
+                                    {job.title}
+                                </p>
+                                <p className="mt-1 text-xs font-semibold text-[#e57124]">
+                                    {job.company}
+                                </p>
+                                <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-medium text-[#64748b]">
+                                    {job.type ? (
+                                        <span className="rounded-full bg-[#dcfce7] px-2 py-0.5 text-[#166534]">
+                                            {job.type}
+                                        </span>
+                                    ) : null}
+                                    {job.location ? (
+                                        <span className="rounded-full bg-[#f1f5f9] px-2 py-0.5">
+                                            {job.location}
+                                        </span>
+                                    ) : null}
+                                    {job.category ? (
+                                        <span className="rounded-full bg-[#eef5ff] px-2 py-0.5 text-[#0057c8]">
+                                            {job.category}
+                                        </span>
+                                    ) : null}
+                                </div>
+                            </div>
+                            {applicant_cvs.length > 1 ? (
+                                <div className="mt-3 w-full text-start">
+                                    <label
+                                        htmlFor="apply-cv-select"
+                                        className="mb-1.5 block text-xs font-semibold text-[#3977a6]"
+                                    >
+                                        {t('job_detail.cv_label')}
+                                    </label>
+                                    <select
+                                        id="apply-cv-select"
+                                        value={selectedCvId ?? ''}
+                                        onChange={(event) => {
+                                            setSelectedCvId(
+                                                event.target.value
+                                                    ? Number(event.target.value)
+                                                    : null,
+                                            );
+                                            if (cvError) {
+                                                setCvError(null);
+                                            }
+                                        }}
+                                        className="w-full rounded-xl border border-[#dbeafe] bg-white px-3 py-2.5 text-sm text-[#050315] outline-none focus:border-[#0057c8]"
+                                    >
+                                        {applicant_cvs.map((cv) => (
+                                            <option key={cv.id} value={cv.id}>
+                                                {cv.label}
+                                                {cv.file_name
+                                                    ? ` — ${cv.file_name}`
+                                                    : ''}
+                                                {cv.is_default
+                                                    ? ` (${t('job_detail.cv_default')})`
+                                                    : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {cvError ? (
+                                        <p className="mt-1.5 text-xs font-medium text-[#b91c1c]">
+                                            {cvError}
+                                        </p>
+                                    ) : (
+                                        <p className="mt-1.5 text-xs text-[#64748b]">
+                                            {t('job_detail.cv_hint')}
+                                        </p>
+                                    )}
+                                </div>
+                            ) : applicant_cvs.length === 1 ? (
+                                <p className="mt-3 w-full rounded-xl border border-[#e2e8f0] bg-white/80 px-3 py-2 text-start text-xs text-[#64748b]">
+                                    {t('job_detail.cv_using_single', {
+                                        label: applicant_cvs[0].label,
+                                    })}
+                                </p>
+                            ) : null}
+
+                            <div className="mt-3 w-full text-start">
+                                <label
+                                    htmlFor="apply-cover-letter"
+                                    className="mb-1.5 block text-xs font-semibold text-[#3977a6]"
+                                >
+                                    {t('job_detail.cover_letter_label')}{' '}
+                                    <span className="font-normal text-[#94a3b8]">
+                                        ({t('common.optional')})
+                                    </span>
+                                </label>
+                                <textarea
+                                    id="apply-cover-letter"
+                                    value={coverLetter}
+                                    onChange={(event) => {
+                                        setCoverLetter(event.target.value);
+                                        if (coverLetterError) {
+                                            setCoverLetterError(null);
+                                        }
+                                    }}
+                                    rows={5}
+                                    placeholder={t(
+                                        'job_detail.cover_letter_placeholder',
+                                    )}
+                                    className="w-full rounded-xl border border-[#dbeafe] bg-white px-3 py-2.5 text-sm text-[#050315] outline-none focus:border-[#0057c8]"
+                                />
+                                {coverLetterError ? (
+                                    <p className="mt-1.5 text-xs font-medium text-[#b91c1c]">
+                                        {coverLetterError}
+                                    </p>
+                                ) : (
+                                    <p className="mt-1.5 text-xs text-[#64748b]">
+                                        {t('job_detail.cover_letter_hint')}
+                                    </p>
+                                )}
+                            </div>
+
+                            {applicationQuestions.length > 0 ? (
+                                <div className="mt-4 w-full space-y-3 text-start">
+                                    {applicationQuestions.map((question) => (
+                                        <div key={question.id}>
+                                            <label
+                                                htmlFor={`apply-q-${question.id}`}
+                                                className="mb-1.5 block text-xs font-semibold text-[#3977a6]"
+                                            >
+                                                {question.prompt}
+                                                {question.required ? (
+                                                    <span className="text-[#b91c1c]">
+                                                        {' '}
+                                                        *
+                                                    </span>
+                                                ) : (
+                                                    <span className="font-normal text-[#94a3b8]">
+                                                        {' '}
+                                                        ({t('common.optional')})
+                                                    </span>
+                                                )}
+                                            </label>
+                                            {question.type === 'yes_no' ? (
+                                                <select
+                                                    id={`apply-q-${question.id}`}
+                                                    value={
+                                                        questionAnswers[
+                                                            question.id
+                                                        ] ?? ''
+                                                    }
+                                                    onChange={(event) =>
+                                                        setQuestionAnswers(
+                                                            (current) => ({
+                                                                ...current,
+                                                                [question.id]:
+                                                                    event.target
+                                                                        .value,
+                                                            }),
+                                                        )
+                                                    }
+                                                    className="w-full rounded-xl border border-[#dbeafe] bg-white px-3 py-2.5 text-sm text-[#050315] outline-none focus:border-[#0057c8]"
+                                                >
+                                                    <option value="">
+                                                        {t(
+                                                            'job_detail.question_select',
+                                                        )}
+                                                    </option>
+                                                    <option value="yes">
+                                                        {t('common.yes')}
+                                                    </option>
+                                                    <option value="no">
+                                                        {t('common.no')}
+                                                    </option>
+                                                </select>
+                                            ) : question.type === 'textarea' ? (
+                                                <textarea
+                                                    id={`apply-q-${question.id}`}
+                                                    rows={3}
+                                                    value={
+                                                        questionAnswers[
+                                                            question.id
+                                                        ] ?? ''
+                                                    }
+                                                    onChange={(event) =>
+                                                        setQuestionAnswers(
+                                                            (current) => ({
+                                                                ...current,
+                                                                [question.id]:
+                                                                    event.target
+                                                                        .value,
+                                                            }),
+                                                        )
+                                                    }
+                                                    className="w-full rounded-xl border border-[#dbeafe] bg-white px-3 py-2.5 text-sm text-[#050315] outline-none focus:border-[#0057c8]"
+                                                />
+                                            ) : (
+                                                <input
+                                                    id={`apply-q-${question.id}`}
+                                                    type="text"
+                                                    value={
+                                                        questionAnswers[
+                                                            question.id
+                                                        ] ?? ''
+                                                    }
+                                                    onChange={(event) =>
+                                                        setQuestionAnswers(
+                                                            (current) => ({
+                                                                ...current,
+                                                                [question.id]:
+                                                                    event.target
+                                                                        .value,
+                                                            }),
+                                                        )
+                                                    }
+                                                    className="w-full rounded-xl border border-[#dbeafe] bg-white px-3 py-2.5 text-sm text-[#050315] outline-none focus:border-[#0057c8]"
+                                                />
+                                            )}
+                                            {questionErrors[question.id] ? (
+                                                <p className="mt-1.5 text-xs font-medium text-[#b91c1c]">
+                                                    {questionErrors[question.id]}
+                                                </p>
+                                            ) : null}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : null}
+                        </DialogHeader>
+                    </div>
+
+                    <DialogFooter className="flex flex-row items-center justify-between gap-3 border-t border-[#eef2f7] bg-[#f8faff] px-5 py-4 sm:space-x-0">
+                        <button
+                            type="button"
+                            disabled={applying}
+                            onClick={goToProfile}
+                            className="inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border border-[#bfdbfe] bg-white px-3 text-sm font-semibold text-[#0057c8] shadow-sm transition hover:border-[#0057c8] hover:bg-[#eef5ff] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <UserRoundPen className="size-4 shrink-0" />
+                            <span className="truncate">
+                                {t('job_detail.modify_profile')}
+                            </span>
+                        </button>
+                        <button
+                            type="button"
+                            disabled={applying}
+                            onClick={confirmApply}
+                            className="inline-flex h-11 min-w-0 flex-1 items-center justify-center rounded-xl bg-[#0057c8] px-3 text-sm font-semibold text-white shadow-[0_8px_18px_rgba(0,87,200,0.28)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <span className="truncate">
+                                {t('job_detail.apply_confirm')}
+                            </span>
+                        </button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </FrontendLayout>
+    );
+}

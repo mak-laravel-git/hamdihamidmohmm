@@ -1,0 +1,836 @@
+import {
+    CalendarDays,
+    Download,
+    ExternalLink,
+    Mail,
+    MapPin,
+    Phone,
+    Send,
+    X,
+} from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+
+import { AtsMatchSection, type AtsMatch } from '@/components/employer/ats-score';
+import { getInitials } from '@/components/employer/demo-data';
+import { NativeSelect } from '@/components/ui/native-select';
+import {
+    Sheet,
+    SheetClose,
+    SheetContent,
+    SheetDescription,
+    SheetTitle,
+} from '@/components/ui/sheet';
+import { useLocale } from '@/hooks/use-locale';
+import { cn } from '@/lib/utils';
+
+export type ApplicationPreviewTimelineStep = {
+    label: string;
+    date: string | null;
+    state: 'done' | 'current' | 'pending' | string;
+};
+
+export type ProfileEntry = {
+    title: string;
+    subtitle: string | null;
+    meta: string | null;
+    body: string | null;
+};
+
+export type ApplicationPreview = {
+    id: number;
+    name: string;
+    title: string;
+    status: string;
+    status_value: string;
+    status_changed_by?: string | null;
+    status_history?: Array<{
+        status: string;
+        changed_by: string;
+        at: string | null;
+    }>;
+    email: string;
+    phone: string;
+    location: string;
+    current_title: string | null;
+    gender?: string | null;
+    experience_years: string | null;
+    industry: string | null;
+    expected_salary: string | null;
+    availability: string[];
+    bio: string | null;
+    linkedin_url: string | null;
+    github_url: string | null;
+    skills: string[];
+    education: ProfileEntry[];
+    experience: ProfileEntry[];
+    languages: Array<{ name: string; level: string | null }>;
+    certifications: Array<{
+        name: string;
+        issuer: string | null;
+        date: string | null;
+        attachments?: Array<{
+            file_name: string;
+            download_url: string | null;
+        }>;
+    }>;
+    references?: Array<{
+        name: string;
+        address: string | null;
+        relationship: string | null;
+    }>;
+    cover_letter: string | null;
+    question_answers?: Array<{
+        id: string;
+        prompt: string;
+        type: string;
+        required: boolean;
+        answer: string | null;
+    }>;
+    resume_name: string | null;
+    resume_url: string | null;
+    highest_degree_name?: string | null;
+    highest_degree_url?: string | null;
+    other_document_name?: string | null;
+    other_document_url?: string | null;
+    cover_letter_file_name?: string | null;
+    cover_letter_file_url?: string | null;
+    avatar_url?: string | null;
+    timeline: ApplicationPreviewTimelineStep[];
+    on_roster?: boolean;
+    roster_entry_id?: number | null;
+    ai?: AtsMatch | null;
+};
+
+type StatusOption = {
+    value: string;
+    label: string;
+};
+
+export function ApplicationPreviewDrawer({
+    open,
+    onOpenChange,
+    preview,
+    statuses,
+    onUpdateStatus,
+    onRescore,
+    onAddToRoster,
+    onRemoveFromRoster,
+}: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    preview: ApplicationPreview | null;
+    statuses: StatusOption[];
+    onUpdateStatus: (applicationId: number, status: string) => void;
+    onRescore?: (applicationId: number) => void;
+    onAddToRoster?: (applicationId: number) => void;
+    onRemoveFromRoster?: (entryId: number) => void;
+}) {
+    const { t } = useLocale();
+
+    return (
+        <Sheet open={open} onOpenChange={onOpenChange}>
+            <SheetContent
+                side="right"
+                showCloseButton={false}
+                overlayClassName="bg-[rgba(5,3,21,0.4)]"
+                className="w-full max-w-full gap-0 border-0 p-0 shadow-[-4px_0px_24px_0px_rgba(5,3,21,0.15)] sm:w-[33.333vw] sm:max-w-[33.333vw]"
+            >
+                {preview ? (
+                    <DrawerBody
+                        key={`${preview.id}-${preview.status_value}`}
+                        preview={preview}
+                        statuses={statuses}
+                        onUpdateStatus={onUpdateStatus}
+                        onRescore={onRescore}
+                        onAddToRoster={onAddToRoster}
+                        onRemoveFromRoster={onRemoveFromRoster}
+                    />
+                ) : (
+                    <div className="p-5 text-base text-[#3977a6]">
+                        {t('employer.drawer.no_preview')}
+                    </div>
+                )}
+            </SheetContent>
+        </Sheet>
+    );
+}
+
+function DrawerBody({
+    preview,
+    statuses,
+    onUpdateStatus,
+    onRescore,
+    onAddToRoster,
+    onRemoveFromRoster,
+}: {
+    preview: ApplicationPreview;
+    statuses: StatusOption[];
+    onUpdateStatus: (applicationId: number, status: string) => void;
+    onRescore?: (applicationId: number) => void;
+    onAddToRoster?: (applicationId: number) => void;
+    onRemoveFromRoster?: (entryId: number) => void;
+}) {
+    const { t } = useLocale();
+    const [selectedStatus, setSelectedStatus] = useState(preview.status_value);
+    const [avatarFailed, setAvatarFailed] = useState(false);
+    const mailto = preview.email !== '—' ? `mailto:${preview.email}` : null;
+    const showAvatar = Boolean(preview.avatar_url) && !avatarFailed;
+
+    return (
+        <div className="flex h-full flex-col bg-white">
+            <div className="flex shrink-0 items-center gap-4 border-b border-[#d1f6ff] bg-[#d1f6ff] p-5">
+                {showAvatar ? (
+                    <img
+                        src={preview.avatar_url ?? undefined}
+                        alt={preview.name}
+                        onError={() => setAvatarFailed(true)}
+                        className="size-[56px] shrink-0 rounded-full border border-white object-cover object-top shadow-sm"
+                    />
+                ) : (
+                    <div className="flex size-[56px] shrink-0 items-center justify-center rounded-full bg-[#0057c8] text-lg font-extrabold text-white">
+                        {getInitials(preview.name) || '—'}
+                    </div>
+                )}
+                <div className="min-w-0 flex-1">
+                    <SheetTitle className="text-lg font-extrabold text-[#050315]">
+                        {preview.name}
+                    </SheetTitle>
+                    <SheetDescription className="pt-0.5 text-[14.5px] leading-[21px] text-[#3977a6]">
+                        {preview.title}
+                    </SheetDescription>
+                    <span className="mt-1 inline-flex rounded-full bg-[#fdf4ff] px-2.5 py-0.5 text-[13px] font-bold text-[#7e22ce]">
+                        {preview.status}
+                    </span>
+                    {preview.status_changed_by ? (
+                        <p className="mt-1 text-[12.5px] text-[#64748b]">
+                            {t('employer.applications.changed_by', {
+                                name: preview.status_changed_by,
+                            })}
+                        </p>
+                    ) : null}
+                </div>
+                <SheetClose asChild>
+                    <button
+                        type="button"
+                        aria-label={t('common.close')}
+                        className="flex size-8 shrink-0 items-center justify-center text-[20px] text-[#3977a6] hover:text-[#050315]"
+                    >
+                        <X className="size-5" strokeWidth={1.75} />
+                    </button>
+                </SheetClose>
+            </div>
+
+            <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">
+                {preview.ai ? (
+                    <AtsMatchSection
+                        match={preview.ai}
+                        onRescore={
+                            onRescore ? () => onRescore(preview.id) : undefined
+                        }
+                    />
+                ) : null}
+
+                <Section title={t('employer.drawer.contact')}>
+                    <div className="flex flex-col gap-[4.8px]">
+                        <ContactRow icon={Mail} value={preview.email} />
+                        <ContactRow icon={Phone} value={preview.phone} />
+                        <ContactRow icon={MapPin} value={preview.location} />
+                    </div>
+                </Section>
+
+                <Section title={t('employer.drawer.professional')}>
+                    <DetailGrid
+                        items={[
+                            [
+                                t('employer.drawer.current_title'),
+                                preview.current_title,
+                            ],
+                            [t('employer.drawer.gender'), preview.gender],
+                            [
+                                t('employer.drawer.experience'),
+                                preview.experience_years,
+                            ],
+                            [t('employer.drawer.industry'), preview.industry],
+                            [
+                                t('employer.drawer.expected_salary'),
+                                preview.expected_salary,
+                            ],
+                        ]}
+                    />
+                    {(preview.availability ?? []).length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5 pt-2">
+                            {preview.availability.map((item) => (
+                                <span
+                                    key={item}
+                                    className="rounded-full bg-[#dbeafe] px-2.5 py-0.5 text-[12.5px] font-semibold text-[#1d4ed8]"
+                                >
+                                    {item}
+                                </span>
+                            ))}
+                        </div>
+                    ) : null}
+                </Section>
+
+                {preview.bio ? (
+                    <Section title={t('employer.drawer.about')}>
+                        <p className="text-[15px] leading-6 text-[#050315]">
+                            {preview.bio}
+                        </p>
+                    </Section>
+                ) : null}
+
+                {(preview.linkedin_url || preview.github_url) && (
+                    <Section title={t('employer.drawer.links')}>
+                        <div className="flex flex-col gap-1.5">
+                            {preview.linkedin_url ? (
+                                <LinkRow
+                                    href={preview.linkedin_url}
+                                    label={t('employer.drawer.linkedin')}
+                                />
+                            ) : null}
+                            {preview.github_url ? (
+                                <LinkRow
+                                    href={preview.github_url}
+                                    label={t('employer.drawer.github')}
+                                />
+                            ) : null}
+                        </div>
+                    </Section>
+                )}
+
+                <Section title={t('employer.drawer.skills')}>
+                    <div className="flex flex-wrap gap-[6.4px]">
+                        {preview.skills.length === 0 ? (
+                            <EmptyText>
+                                {t('employer.drawer.no_skills')}
+                            </EmptyText>
+                        ) : (
+                            preview.skills.map((skill) => (
+                                <span
+                                    key={skill}
+                                    className="rounded-full bg-[#eeeffe] px-[9.6px] py-[3.2px] text-sm font-semibold text-[#0057c8]"
+                                >
+                                    {skill}
+                                </span>
+                            ))
+                        )}
+                    </div>
+                </Section>
+
+                <EntriesSection
+                    title={t('employer.drawer.experience')}
+                    entries={preview.experience}
+                />
+                <EntriesSection
+                    title={t('employer.drawer.education')}
+                    entries={preview.education}
+                />
+
+                <Section title={t('employer.drawer.languages')}>
+                    {preview.languages.length === 0 ? (
+                        <EmptyText>
+                            {t('employer.drawer.no_languages')}
+                        </EmptyText>
+                    ) : (
+                        <div className="space-y-2">
+                            {preview.languages.map((language) => (
+                                <div
+                                    key={language.name}
+                                    className="flex items-center justify-between gap-2 rounded-lg border border-[#f1f5f9] px-3 py-2"
+                                >
+                                    <span className="text-[15px] font-semibold text-[#050315]">
+                                        {language.name}
+                                    </span>
+                                    {language.level ? (
+                                        <span className="rounded-full bg-[#dcfce7] px-2 py-0.5 text-[12.5px] font-semibold text-[#15803d]">
+                                            {language.level}
+                                        </span>
+                                    ) : null}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </Section>
+
+                <Section title={t('employer.drawer.certifications')}>
+                    {preview.certifications.length === 0 ? (
+                        <EmptyText>
+                            {t('employer.drawer.no_certifications')}
+                        </EmptyText>
+                    ) : (
+                        <div className="space-y-3">
+                            {preview.certifications.map((item) => (
+                                <div key={item.name} className="space-y-1.5">
+                                    <p className="text-[15px] font-semibold text-[#050315]">
+                                        {item.name}
+                                    </p>
+                                    <p className="text-[13.5px] text-[#3977a6]">
+                                        {[item.issuer, item.date]
+                                            .filter(Boolean)
+                                            .join(' · ') || '—'}
+                                    </p>
+                                    {(item.attachments ?? []).map((file) =>
+                                        file.download_url ? (
+                                            <a
+                                                key={`${item.name}-${file.file_name}`}
+                                                href={file.download_url}
+                                                download
+                                                className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#0057c8]"
+                                            >
+                                                <Download
+                                                    className="size-3.5"
+                                                    strokeWidth={2}
+                                                />
+                                                {file.file_name}
+                                            </a>
+                                        ) : null,
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </Section>
+
+                <Section title={t('employer.drawer.references')}>
+                    {(preview.references ?? []).length === 0 ? (
+                        <EmptyText>
+                            {t('employer.drawer.no_references')}
+                        </EmptyText>
+                    ) : (
+                        <div className="space-y-3">
+                            {(preview.references ?? []).map((item) => (
+                                <div key={item.name} className="space-y-1">
+                                    <p className="text-[15px] font-semibold text-[#050315]">
+                                        {item.name}
+                                    </p>
+                                    <p className="text-[13.5px] text-[#3977a6]">
+                                        {[item.relationship, item.address]
+                                            .filter(Boolean)
+                                            .join(' · ') || '—'}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </Section>
+
+                {preview.cover_letter ? (
+                    <Section title={t('employer.drawer.cover_letter')}>
+                        <p className="whitespace-pre-wrap text-[15px] leading-6 text-[#050315]">
+                            {preview.cover_letter}
+                        </p>
+                    </Section>
+                ) : null}
+
+                {(preview.question_answers ?? []).length > 0 ? (
+                    <Section title={t('employer.drawer.questions')}>
+                        <div className="space-y-3">
+                            {(preview.question_answers ?? []).map((item) => (
+                                <div key={item.id}>
+                                    <p className="text-sm font-semibold text-[#64748b]">
+                                        {item.prompt}
+                                    </p>
+                                    <p className="mt-1 whitespace-pre-wrap text-[15px] leading-6 text-[#050315]">
+                                        {item.answer || '—'}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    </Section>
+                ) : null}
+
+                <Section title={t('employer.drawer.documents')}>
+                    <div className="flex flex-col gap-2">
+                        <DocumentDownload
+                            label={t('employer.drawer.resume')}
+                            fileName={preview.resume_name}
+                            url={preview.resume_url}
+                            buttonLabel={t('employer.drawer.download_resume')}
+                        />
+                        <DocumentDownload
+                            label={t('employer.drawer.highest_degree')}
+                            fileName={preview.highest_degree_name}
+                            url={preview.highest_degree_url}
+                            buttonLabel={t(
+                                'employer.drawer.download_highest_degree',
+                            )}
+                        />
+                        <DocumentDownload
+                            label={t('employer.drawer.other_document')}
+                            fileName={preview.other_document_name}
+                            url={preview.other_document_url}
+                            buttonLabel={t(
+                                'employer.drawer.download_other_document',
+                            )}
+                        />
+                        <DocumentDownload
+                            label={t('employer.drawer.cover_letter_file')}
+                            fileName={preview.cover_letter_file_name}
+                            url={preview.cover_letter_file_url}
+                            buttonLabel={t(
+                                'employer.drawer.download_cover_letter',
+                            )}
+                        />
+                        {!preview.resume_url &&
+                        !preview.highest_degree_url &&
+                        !preview.other_document_url &&
+                        !preview.cover_letter_file_url ? (
+                            <EmptyText>
+                                {t('employer.drawer.no_documents')}
+                            </EmptyText>
+                        ) : null}
+                    </div>
+                </Section>
+
+                <Section title={t('employer.drawer.status_timeline')}>
+                    <ol className="flex flex-col">
+                        {preview.timeline.map((step, index) => (
+                            <TimelineStep
+                                key={`${step.label}-${index}`}
+                                step={step}
+                                isLast={index === preview.timeline.length - 1}
+                            />
+                        ))}
+                    </ol>
+                </Section>
+
+                {(preview.status_history?.length ?? 0) > 0 ? (
+                    <Section title={t('employer.applications.status_history')}>
+                        <ul className="space-y-2">
+                            {preview.status_history?.map((entry, index) => (
+                                <li
+                                    key={`${entry.status}-${entry.at}-${index}`}
+                                    className="rounded-lg bg-[#f8fafc] px-3 py-2 text-[15px] text-[#334155]"
+                                >
+                                    <span className="font-semibold">
+                                        {entry.status}
+                                    </span>
+                                    <span className="text-[#64748b]">
+                                        {' '}
+                                        ·{' '}
+                                        {t('employer.applications.changed_by', {
+                                            name: entry.changed_by,
+                                        })}
+                                    </span>
+                                    {entry.at ? (
+                                        <span className="mt-0.5 block text-sm text-[#94a3b8]">
+                                            {entry.at}
+                                        </span>
+                                    ) : null}
+                                </li>
+                            ))}
+                        </ul>
+                    </Section>
+                ) : null}
+
+                <Section title={t('employer.drawer.change_status')}>
+                    <div className="flex items-center gap-2">
+                        <NativeSelect
+                            variant="filter"
+                            className="flex-1"
+                            value={selectedStatus}
+                            onChange={(event) =>
+                                setSelectedStatus(event.target.value)
+                            }
+                            aria-label={t('employer.drawer.change_status_aria')}
+                        >
+                            {statuses.map((status) => (
+                                <option key={status.value} value={status.value}>
+                                    {status.label}
+                                </option>
+                            ))}
+                        </NativeSelect>
+                        <button
+                            type="button"
+                            className="inline-flex h-[40px] items-center justify-center gap-1.5 rounded-[8px] bg-[#0057c8] px-3 text-[14.5px] font-semibold text-white hover:bg-[#0046a3]"
+                            onClick={() =>
+                                onUpdateStatus(preview.id, selectedStatus)
+                            }
+                        >
+                            <Send className="size-3.5" strokeWidth={2} />
+                            {t('common.update')}
+                        </button>
+                    </div>
+                </Section>
+
+                {onAddToRoster ? (
+                    <Section title={t('employer.roster.title')}>
+                        <button
+                            type="button"
+                            className={cn(
+                                'inline-flex h-[40px] w-full items-center justify-center rounded-[8px] border px-3 text-[14.5px] font-semibold',
+                                preview.on_roster
+                                    ? 'border-[#bbf7d0] bg-[#f0fdf4] text-[#15803d]'
+                                    : 'border-[#0057c8] bg-white text-[#0057c8] hover:bg-[#f8faff]',
+                            )}
+                            onClick={() => {
+                                if (
+                                    preview.on_roster &&
+                                    preview.roster_entry_id &&
+                                    onRemoveFromRoster
+                                ) {
+                                    onRemoveFromRoster(preview.roster_entry_id);
+
+                                    return;
+                                }
+
+                                onAddToRoster(preview.id);
+                            }}
+                        >
+                            {preview.on_roster
+                                ? t('employer.roster.out')
+                                : t('employer.roster.in')}
+                        </button>
+                        <p className="mt-2 text-[13.5px] leading-[20px] text-[#64748b]">
+                            {t('employer.roster.not_shortlist_hint')}
+                        </p>
+                    </Section>
+                ) : null}
+            </div>
+
+            <div className="flex shrink-0 gap-2 border-t border-[#e2e8f0] p-4">
+                {mailto ? (
+                    <a
+                        href={`${mailto}?subject=${encodeURIComponent(t('employer.drawer.interview_subject'))}`}
+                        className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-[8px] border border-[#0057c8] text-[14.5px] font-semibold text-[#0057c8]"
+                    >
+                        <CalendarDays className="size-3.5" />
+                        {t('employer.drawer.schedule_interview')}
+                    </a>
+                ) : (
+                    <button
+                        type="button"
+                        disabled
+                        className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-[8px] border border-[#0057c8] text-[14.5px] font-semibold text-[#0057c8] opacity-50"
+                    >
+                        <CalendarDays className="size-3.5" />
+                        {t('employer.drawer.schedule_interview')}
+                    </button>
+                )}
+                {mailto ? (
+                    <a
+                        href={mailto}
+                        className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-[8px] bg-[#0057c8] text-[14.5px] font-semibold text-white"
+                    >
+                        <Mail className="size-3.5" />
+                        {t('employer.drawer.send_message')}
+                    </a>
+                ) : (
+                    <button
+                        type="button"
+                        disabled
+                        className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-[8px] bg-[#0057c8] text-[14.5px] font-semibold text-white opacity-50"
+                    >
+                        <Mail className="size-3.5" />
+                        {t('employer.drawer.send_message')}
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function DocumentDownload({
+    label,
+    fileName,
+    url,
+    buttonLabel,
+}: {
+    label: string;
+    fileName?: string | null;
+    url?: string | null;
+    buttonLabel: string;
+}) {
+    if (!url) {
+        return null;
+    }
+
+    return (
+        <div className="rounded-lg border border-[#e2e8f0] px-3 py-2.5">
+            <p className="text-[12.5px] font-semibold text-[#64748b]">{label}</p>
+            {fileName ? (
+                <p className="truncate pt-0.5 text-[14px] text-[#3977a6]">
+                    {fileName}
+                </p>
+            ) : null}
+            <a
+                href={url}
+                download
+                className="mt-2 inline-flex h-[36px] items-center justify-center gap-2 rounded-[8px] border border-[#0057c8] bg-[#0057c8] px-3 text-[14px] font-semibold text-white hover:bg-[#0046a3]"
+            >
+                <Download className="size-3.5" strokeWidth={2} />
+                {buttonLabel}
+            </a>
+        </div>
+    );
+}
+
+function Section({
+    title,
+    children,
+}: {
+    title: string;
+    children: ReactNode;
+}) {
+    return (
+        <section>
+            <h3 className="pb-2 text-[14px] font-bold tracking-[0.512px] text-[#3977a6] uppercase">
+                {title}
+            </h3>
+            {children}
+        </section>
+    );
+}
+
+function EmptyText({ children }: { children: ReactNode }) {
+    return <p className="text-[15px] text-[#3977a6]">{children}</p>;
+}
+
+function DetailGrid({
+    items,
+}: {
+    items: Array<[string, string | null | undefined]>;
+}) {
+    const { t } = useLocale();
+    const visible = items.filter(([, value]) => value && value !== '—');
+
+    if (visible.length === 0) {
+        return <EmptyText>{t('employer.drawer.no_professional')}</EmptyText>;
+    }
+
+    return (
+        <div className="grid grid-cols-2 gap-3">
+            {visible.map(([label, value]) => (
+                <div key={label}>
+                    <p className="text-[12.5px] font-semibold text-[#64748b]">
+                        {label}
+                    </p>
+                    <p className="pt-0.5 text-[15px] font-medium text-[#050315]">
+                        {value}
+                    </p>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function EntriesSection({
+    title,
+    entries,
+}: {
+    title: string;
+    entries: ProfileEntry[];
+}) {
+    const { t } = useLocale();
+
+    return (
+        <Section title={title}>
+            {entries.length === 0 ? (
+                <EmptyText>
+                    {t('employer.drawer.no_entries', { section: title })}
+                </EmptyText>
+            ) : (
+                <ol className="space-y-3">
+                    {entries.map((entry, index) => (
+                        <li key={`${entry.title}-${index}`}>
+                            <p className="text-[15px] font-semibold text-[#050315]">
+                                {entry.title}
+                            </p>
+                            {entry.subtitle ? (
+                                <p className="text-[14px] text-[#3977a6]">
+                                    {entry.subtitle}
+                                </p>
+                            ) : null}
+                            {entry.meta ? (
+                                <p className="text-[13px] text-[#64748b]">
+                                    {entry.meta}
+                                </p>
+                            ) : null}
+                            {entry.body ? (
+                                <p className="pt-1 text-[14px] leading-6 text-[#374151]">
+                                    {entry.body}
+                                </p>
+                            ) : null}
+                        </li>
+                    ))}
+                </ol>
+            )}
+        </Section>
+    );
+}
+
+function LinkRow({ href, label }: { href: string; label: string }) {
+    return (
+        <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 text-[15px] font-semibold text-[#0057c8]"
+        >
+            <ExternalLink className="size-3.5" />
+            {label}
+        </a>
+    );
+}
+
+function ContactRow({
+    icon: Icon,
+    value,
+}: {
+    icon: typeof Mail;
+    value: string;
+}) {
+    return (
+        <p className="flex items-center gap-2 text-[15px] leading-[22px] text-[#3977a6]">
+            <Icon className="size-4 shrink-0" strokeWidth={1.75} />
+            <span className="min-w-0 truncate">{value}</span>
+        </p>
+    );
+}
+
+function TimelineStep({
+    step,
+    isLast,
+}: {
+    step: ApplicationPreviewTimelineStep;
+    isLast: boolean;
+}) {
+    const isDone = step.state === 'done';
+    const isCurrent = step.state === 'current';
+
+    return (
+        <li className="flex gap-3">
+            <div className="flex flex-col items-center">
+                <span
+                    className={cn(
+                        'mt-1 size-2.5 rounded-full',
+                        isDone || isCurrent ? 'bg-[#0057c8]' : 'bg-[#cbd5e1]',
+                    )}
+                />
+                {!isLast ? (
+                    <span
+                        className={cn(
+                            'mt-1 w-0.5 flex-1',
+                            isDone ? 'bg-[#0057c8]' : 'bg-[#e2e8f0]',
+                        )}
+                    />
+                ) : null}
+            </div>
+            <div className={cn('min-w-0 pb-4', isLast && 'pb-0')}>
+                <p
+                    className={cn(
+                        'text-[15px] font-semibold',
+                        isCurrent || isDone
+                            ? 'text-[#050315]'
+                            : 'text-[#94a3b8]',
+                    )}
+                >
+                    {step.label}
+                </p>
+                {step.date ? (
+                    <p className="text-[13px] text-[#64748b]">{step.date}</p>
+                ) : null}
+            </div>
+        </li>
+    );
+}
