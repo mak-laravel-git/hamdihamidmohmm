@@ -27,7 +27,7 @@ test('two factor settings redirects employers to portal account settings', funct
         ->assertRedirect(route('employer.settings', ['tab' => 'account']));
 });
 
-test('two factor settings redirects admins to platform security settings', function () {
+test('two factor settings redirects admins to personal security settings', function () {
     if (! Features::enabled(Features::twoFactorAuthentication())) {
         $this->markTestSkipped('Two-factor authentication is not enabled.');
     }
@@ -36,7 +36,7 @@ test('two factor settings redirects admins to platform security settings', funct
 
     $this->actingAs($admin)
         ->get(route('two-factor.show'))
-        ->assertRedirect(route('admin.settings.index', ['tab' => 'security']));
+        ->assertRedirect(route('admin.account.index', ['tab' => 'security']));
 });
 
 test('employer settings exposes two factor status', function () {
@@ -52,15 +52,15 @@ test('employer settings exposes two factor status', function () {
             ->where('two_factor_enabled', true));
 });
 
-test('admin platform settings exposes two factor status', function () {
+test('admin account settings exposes two factor status', function () {
     $admin = User::factory()->admin()->create([
         'two_factor_confirmed_at' => now(),
     ]);
 
     $this->actingAs($admin)
-        ->get(route('admin.settings.index'))
+        ->get(route('admin.account.index'))
         ->assertOk()
         ->assertInertia(fn ($page) => $page
-            ->component('backend/Admin/PlatformSettings')
+            ->component('backend/Admin/AdminAccountSettings')
             ->where('two_factor_enabled', true));
 });

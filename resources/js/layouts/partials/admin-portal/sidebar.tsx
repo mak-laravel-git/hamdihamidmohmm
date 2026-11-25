@@ -148,6 +148,15 @@ const navItems: NavItem[] = [
     },
 ];
 
+const personalNavItems: NavItem[] = [
+    {
+        titleKey: 'admin.nav.personal_settings',
+        href: '/admin/account',
+        icon: '/images/admin/nav-settings.svg',
+        match: '/admin/account',
+    },
+];
+
 const formatBadge = (count: number): string =>
     count > 99 ? '99+' : String(count);
 
@@ -268,6 +277,49 @@ export function AdminPortalSidebar({
                             </Link>
                         );
                     })}
+
+                <div className={cn('mt-3', !collapsed && 'pt-2')}>
+                    {!collapsed ? (
+                        <p className="px-3 pb-1 text-[10px] font-semibold tracking-[0.08em] text-[#3977a6] uppercase">
+                            {t('admin.nav.section.personal_profile')}
+                        </p>
+                    ) : null}
+                    {personalNavItems.map((item) => {
+                        const active = item.match
+                            ? currentUrl.startsWith(item.match)
+                            : false;
+                        const title = t(item.titleKey);
+
+                        return (
+                            <Link
+                                key={item.titleKey}
+                                href={item.href!}
+                                onClick={onNavigate}
+                                title={title}
+                                aria-label={title}
+                                className={cn(
+                                    'relative flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium tracking-[-0.16px] transition-colors',
+                                    active
+                                        ? 'bg-[rgba(0,87,200,0.1)] text-[#0057c8]'
+                                        : 'text-[#3977a6] hover:bg-[rgba(0,87,200,0.06)]',
+                                    collapsed && 'justify-center px-2',
+                                )}
+                            >
+                                <AdminIcon
+                                    src={item.icon}
+                                    size={16}
+                                    tint
+                                    className={cn(!active && 'opacity-60')}
+                                />
+                                {!collapsed ? (
+                                    <span className="min-w-0 flex-1 truncate">
+                                        {title}
+                                    </span>
+                                ) : null}
+                            </Link>
+                        );
+                    })}
+                </div>
             </nav>
 
             <div className="shrink-0 border-t border-[rgba(57,119,166,0.2)] px-2 py-3">

@@ -1,5 +1,5 @@
 import { Link, router, usePage } from '@inertiajs/react';
-import { LogOut, UserRound } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 
 import { AdminIcon } from '@/components/admin-icon';
 import { getInitials } from '@/components/job-seeker/demo-data';
@@ -7,7 +7,6 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
-    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useLocale } from '@/hooks/use-locale';
@@ -121,16 +120,6 @@ export function AdminPortalHeader({
                         sideOffset={8}
                         className="w-48 rounded-xl border border-[#e2e8f0] bg-white p-1 shadow-[0px_8px_20px_rgba(5,3,21,0.08)]"
                     >
-                        <DropdownMenuItem asChild>
-                            <Link
-                                href="/settings/profile"
-                                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-[#364153]"
-                            >
-                                <UserRound className="size-4 text-[#0057c8]" />
-                                {t('common.profile')}
-                            </Link>
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator className="bg-[#e2e8f0]" />
                         <DropdownMenuItem
                             className="cursor-pointer rounded-lg px-2 py-2 text-sm text-[#b91c1c] focus:bg-[#fef2f2] focus:text-[#b91c1c]"
                             onSelect={() => router.post('/logout')}

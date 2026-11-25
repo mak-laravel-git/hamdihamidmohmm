@@ -18,7 +18,7 @@ class TwoFactorAuthenticationController extends Controller
         $user = $request->user();
 
         if ($user?->isAdmin()) {
-            return redirect()->route('admin.settings.index', ['tab' => 'security']);
+            return redirect()->route('admin.account.index', ['tab' => 'security']);
         }
 
         if ($user?->isEmployer()) {

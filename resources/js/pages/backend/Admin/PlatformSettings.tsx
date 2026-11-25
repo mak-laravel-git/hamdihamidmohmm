@@ -20,7 +20,6 @@ import {
     AdminPrimaryButton,
     AdminSecondaryButton,
 } from '@/components/admin-portal/ui';
-import TwoFactorSettingsPanel from '@/components/two-factor-settings-panel';
 import { useLocale } from '@/hooks/use-locale';
 import AdminPortalLayout from '@/layouts/admin-portal-layout';
 import { cn } from '@/lib/utils';
@@ -79,12 +78,10 @@ export default function PlatformSettings({
     settings,
     experience_ranges = [],
     email_template,
-    two_factor_enabled = false,
 }: {
     settings: SettingsMap;
     experience_ranges?: ExperienceRange[];
     email_template?: EmailTemplate | null;
-    two_factor_enabled?: boolean;
 }) {
     const { flash } = usePage<SharedData>().props;
     const { t } = useLocale();
@@ -258,12 +255,6 @@ export default function PlatformSettings({
                     </AdminPanel>
 
                     <AdminPanel>
-                        {activeTab === 'security' && (
-                            <TwoFactorSettingsPanel
-                                className="mb-6 border-b border-[#e2e8f0] pb-6"
-                                twoFactorEnabled={two_factor_enabled}
-                            />
-                        )}
                         <form
                             className="space-y-4"
                             onSubmit={(event) => {

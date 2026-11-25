@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\RoleName;
+use App\Http\Controllers\Backend\Admin\AdminAccountSettingsController;
 use App\Http\Controllers\Backend\Admin\AdminDashboardController;
 use App\Http\Controllers\Backend\Admin\AdminManagementController;
 use App\Http\Controllers\Backend\Admin\AdminNotificationController;
@@ -159,6 +160,9 @@ Route::prefix('admin')->name('admin.')->group(function () {
         Route::post('/ai-assistant/messages', [AiAssistantController::class, 'send'])->middleware('throttle:ai-admin-chat')->name('ai-assistant.messages.store');
         Route::delete('/ai-assistant/messages', [AiAssistantController::class, 'clear'])->name('ai-assistant.messages.destroy');
         Route::post('/ai-assistant/translate', [AiAssistantController::class, 'translate'])->middleware('throttle:ai-admin-chat')->name('ai-assistant.translate');
+
+        Route::get('/account', [AdminAccountSettingsController::class, 'index'])->name('account.index');
+        Route::put('/account', [AdminAccountSettingsController::class, 'update'])->name('account.update');
 
         Route::get('/settings', [PlatformSettingController::class, 'index'])->name('settings.index');
         Route::put('/settings', [PlatformSettingController::class, 'update'])->name('settings.update');
