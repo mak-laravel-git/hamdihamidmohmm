@@ -41,5 +41,9 @@ test('two factor challenge can be rendered', function () {
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('auth/two-factor-challenge')
+            ->where('translations', fn ($translations) => ($translations['auth.authentication_code'] ?? null) === 'Authenticator Code'
+                && ($translations['auth.authentication_code_description'] ?? null) === 'Open your authenticator app and enter the 6-digit verification code to continue signing in.'
+                && ($translations['auth.authenticator_app_code'] ?? null) === 'Authenticator app code'
+                && ($translations['auth.authenticator_hint'] ?? null) === 'The code refreshes every 30 seconds. Use the latest one shown in your app.')
         );
 });

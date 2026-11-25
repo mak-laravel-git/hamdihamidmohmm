@@ -2,19 +2,17 @@
 <html lang="{{ str_replace('_', '-', $locale ?? app()->getLocale()) }}"
       dir="{{ $dir ?? 'ltr' }}"
       @class([
-          'dark' => ($appearance ?? 'system') == 'dark',
           'rtl' => ($dir ?? 'ltr') === 'rtl',
           'ltr' => ($dir ?? 'ltr') === 'ltr',
       ])>
 
-<head>
+    <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     {{-- Apply locale direction immediately to avoid LTR/RTL flash --}}
     <script>
         (function() {
-            const appearance = '{{ $appearance ?? 'system' }}';
             const cookieLocale = document.cookie
                 .split('; ')
                 .find((row) => row.startsWith('locale='))
@@ -26,24 +24,15 @@
             document.documentElement.dir = dir;
             document.documentElement.classList.toggle('rtl', dir === 'rtl');
             document.documentElement.classList.toggle('ltr', dir === 'ltr');
-
-            if (appearance === 'system') {
-                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-                if (prefersDark) {
-                    document.documentElement.classList.add('dark');
-                }
-            }
+            document.documentElement.classList.remove('dark');
+            document.documentElement.style.colorScheme = 'light';
         })();
     </script>
 
     <style>
         html {
             background-color: oklch(1 0 0);
-        }
-
-        html.dark {
-            background-color: oklch(0.145 0 0);
+            color-scheme: light;
         }
     </style>
 

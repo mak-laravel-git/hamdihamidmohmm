@@ -111,6 +111,7 @@ class EmployerPortalPageController extends Controller
                 'notifications' => $preferences['notifications'],
                 'privacy' => $preferences['privacy'],
             ],
+            'two_factor_enabled' => $user?->two_factor_confirmed_at !== null,
         ]);
     }
 

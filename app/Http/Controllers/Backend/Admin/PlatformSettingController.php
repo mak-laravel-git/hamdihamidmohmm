@@ -30,6 +30,7 @@ class PlatformSettingController extends Controller
                 'subject' => $template->subject,
                 'body' => $template->body,
             ],
+            'two_factor_enabled' => $request->user()?->two_factor_confirmed_at !== null,
         ]);
     }
 

@@ -1,4 +1,4 @@
-import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
+import { Head, router, useForm, usePage } from '@inertiajs/react';
 import { Globe, Lock, Mail, UserRound } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 
@@ -6,6 +6,7 @@ import {
     PortalPagination,
     type PortalPaginator,
 } from '@/components/portal-pagination';
+import TwoFactorSettingsPanel from '@/components/two-factor-settings-panel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,6 +37,16 @@ const tabs = [
 ] as const;
 
 type TabId = (typeof tabs)[number]['id'];
+
+function initialTabFromUrl(): TabId {
+    if (typeof window === 'undefined') {
+        return 'personal';
+    }
+
+    const tab = new URLSearchParams(window.location.search).get('tab');
+
+    return tabs.some((item) => item.id === tab) ? (tab as TabId) : 'personal';
+}
 
 type SessionRow = {
     id: string;
@@ -76,7 +87,7 @@ export default function JobSeekerSettings({
     const sessions = sessionsPage.data;
     const { flash } = usePage<SharedData>().props;
     const { locale, setLocale, t } = useLocale();
-    const [tab, setTab] = useState<TabId>('personal');
+    const [tab, setTab] = useState<TabId>(initialTabFromUrl);
     const [pendingLocale, setPendingLocale] = useState(locale);
     const profileForm = useForm({
         name: user.name,
@@ -339,34 +350,10 @@ export default function JobSeekerSettings({
                                 </Button>
                             </form>
 
-                            <div className="flex items-start justify-between gap-4 border-t border-[#f1f5f9] pt-6">
-                                <div>
-                                    <h3 className="text-base font-bold text-[#101828]">
-                                        {t('job_seeker.settings.two_factor')}
-                                    </h3>
-                                    <p className="mt-1 text-sm text-[#6a7282]">
-                                        {two_factor_enabled
-                                            ? t(
-                                                  'job_seeker.settings.two_factor_enabled',
-                                              )
-                                            : t(
-                                                  'job_seeker.settings.two_factor_disabled',
-                                              )}
-                                    </p>
-                                    <p className="mt-2 text-xs font-semibold text-[#0057c8]">
-                                        {t('job_seeker.settings.status')}:{' '}
-                                        {two_factor_enabled
-                                            ? t('job_seeker.settings.enabled')
-                                            : t('job_seeker.settings.disabled')}
-                                    </p>
-                                </div>
-                                <Link
-                                    href="/settings/two-factor"
-                                    className="rounded-xl bg-[#0057c8] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0046a3]"
-                                >
-                                    {t('job_seeker.settings.manage')}
-                                </Link>
-                            </div>
+                            <TwoFactorSettingsPanel
+                                className="border-t border-[#f1f5f9] pt-6"
+                                twoFactorEnabled={two_factor_enabled}
+                            />
 
                             <div className="border-t border-[#f1f5f9] pt-6">
                                 <h3 className="text-base font-bold text-[#101828]">

@@ -20,6 +20,7 @@ import {
     AdminPrimaryButton,
     AdminSecondaryButton,
 } from '@/components/admin-portal/ui';
+import TwoFactorSettingsPanel from '@/components/two-factor-settings-panel';
 import { useLocale } from '@/hooks/use-locale';
 import AdminPortalLayout from '@/layouts/admin-portal-layout';
 import { cn } from '@/lib/utils';
@@ -53,14 +54,37 @@ type TabId =
     | 'experience_filters'
     | 'email_templates';
 
+const settingsTabIds: TabId[] = [
+    'general',
+    'email',
+    'social',
+    'payments',
+    'security',
+    'language',
+    'experience_filters',
+    'email_templates',
+];
+
+function initialAdminTabFromUrl(): TabId {
+    if (typeof window === 'undefined') {
+        return 'general';
+    }
+
+    const tab = new URLSearchParams(window.location.search).get('tab');
+
+    return settingsTabIds.includes(tab as TabId) ? (tab as TabId) : 'general';
+}
+
 export default function PlatformSettings({
     settings,
     experience_ranges = [],
     email_template,
+    two_factor_enabled = false,
 }: {
     settings: SettingsMap;
     experience_ranges?: ExperienceRange[];
     email_template?: EmailTemplate | null;
+    two_factor_enabled?: boolean;
 }) {
     const { flash } = usePage<SharedData>().props;
     const { t } = useLocale();
@@ -106,11 +130,22 @@ export default function PlatformSettings({
             icon: Globe,
         },
     ];
-    const [activeTab, setActiveTab] = useState<TabId>('general');
+    const [activeTab, setActiveTab] = useState<TabId>(() => {
+        const tab = initialAdminTabFromUrl();
+        return tab;
+    });
     const [ranges, setRanges] = useState<ExperienceRange[]>(experience_ranges);
     const form = useForm({
-        group: 'general' as TabId,
-        values: settings.general ?? {},
+        group: activeTab,
+        values:
+            activeTab === 'experience_filters'
+                ? { ranges: experience_ranges }
+                : activeTab === 'email_templates'
+                  ? {
+                        subject: email_template?.subject ?? '',
+                        body: email_template?.body ?? '',
+                    }
+                  : (settings[activeTab] ?? {}),
     });
 
     const switchTab = (id: TabId): void => {
@@ -223,6 +258,12 @@ export default function PlatformSettings({
                     </AdminPanel>
 
                     <AdminPanel>
+                        {activeTab === 'security' && (
+                            <TwoFactorSettingsPanel
+                                className="mb-6 border-b border-[#e2e8f0] pb-6"
+                                twoFactorEnabled={two_factor_enabled}
+                            />
+                        )}
                         <form
                             className="space-y-4"
                             onSubmit={(event) => {

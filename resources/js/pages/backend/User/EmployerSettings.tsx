@@ -2,6 +2,7 @@ import { Head, router, useForm, usePage } from '@inertiajs/react';
 import { useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import { getInitials } from '@/components/employer/demo-data';
+import TwoFactorSettingsPanel from '@/components/two-factor-settings-panel';
 import { useLocale } from '@/hooks/use-locale';
 import EmployerLayout from '@/layouts/employer-layout';
 import { cn } from '@/lib/utils';
@@ -13,6 +14,25 @@ type SettingsTab =
     | 'privacy'
     | 'language'
     | 'danger';
+
+function initialEmployerTabFromUrl(): SettingsTab {
+    if (typeof window === 'undefined') {
+        return 'account';
+    }
+
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    const allowed: SettingsTab[] = [
+        'account',
+        'notifications',
+        'privacy',
+        'language',
+        'danger',
+    ];
+
+    return allowed.includes(tab as SettingsTab)
+        ? (tab as SettingsTab)
+        : 'account';
+}
 
 type Preferences = {
     notifications: {
@@ -94,9 +114,11 @@ function passwordStrength(password: string): number {
 export default function EmployerSettings({
     profile,
     preferences,
+    two_factor_enabled = false,
 }: {
     profile: Profile;
     preferences: Preferences;
+    two_factor_enabled?: boolean;
 }) {
     const { auth, flash } = usePage<SharedData>().props;
     const { locale, setLocale, t } = useLocale();
@@ -107,7 +129,9 @@ export default function EmployerSettings({
         { id: 'language', label: t('employer.settings.tab.language') },
         { id: 'danger', label: t('employer.settings.tab.danger'), danger: true },
     ];
-    const [activeTab, setActiveTab] = useState<SettingsTab>('account');
+    const [activeTab, setActiveTab] = useState<SettingsTab>(
+        initialEmployerTabFromUrl,
+    );
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const photoInputRef = useRef<HTMLInputElement>(null);
     const accountForm = useForm({
@@ -243,6 +267,7 @@ export default function EmployerSettings({
                         )}
 
                         {activeTab === 'account' && (
+                            <>
                             <form className="space-y-0" onSubmit={saveAccount}>
                                 <h2 className="text-[17.6px] leading-[26.4px] font-extrabold text-[#050315]">
                                     {t('employer.settings.account_information')}
@@ -478,6 +503,11 @@ export default function EmployerSettings({
                                     {t('common.save_changes')}
                                 </button>
                             </form>
+                            <TwoFactorSettingsPanel
+                                className="mt-8 border-t border-[#e8d5e8] pt-6"
+                                twoFactorEnabled={two_factor_enabled}
+                            />
+                            </>
                         )}
 
                         {activeTab === 'notifications' && (

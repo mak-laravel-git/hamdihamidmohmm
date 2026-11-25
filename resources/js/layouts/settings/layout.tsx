@@ -7,9 +7,7 @@ import { Separator } from '@/components/ui/separator';
 import { useActiveUrl } from '@/hooks/use-active-url';
 import { useLocale } from '@/hooks/use-locale';
 import { cn, toUrl } from '@/lib/utils';
-import { edit as editAppearance } from '@/routes/appearance';
 import { edit } from '@/routes/profile';
-import { show } from '@/routes/two-factor';
 import { edit as editPassword } from '@/routes/user-password';
 import { type NavItem } from '@/types';
 
@@ -26,16 +24,6 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
         {
             title: t('settings.nav.password'),
             href: editPassword(),
-            icon: null,
-        },
-        {
-            title: t('settings.nav.two_factor'),
-            href: show(),
-            icon: null,
-        },
-        {
-            title: t('settings.nav.appearance'),
-            href: editAppearance(),
             icon: null,
         },
     ];

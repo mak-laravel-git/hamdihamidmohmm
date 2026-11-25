@@ -143,7 +143,8 @@ test('employer settings receive contact details', function () {
             ->where('profile.contact_name', 'Fatima Al-Zahrani')
             ->where('profile.email', 'hr@techcorp.com')
             ->where('profile.phone', '+966 11 234 5678')
-            ->where('profile.photo_url', null));
+            ->where('profile.photo_url', null)
+            ->where('two_factor_enabled', false));
 });
 
 test('employers can update account settings from the settings page', function () {

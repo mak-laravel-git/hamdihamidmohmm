@@ -4,7 +4,6 @@ use App\Http\Middleware\EnsureCanAccessAdminPanel;
 use App\Http\Middleware\EnsureEmployerAccountIsApproved;
 use App\Http\Middleware\EnsureUserHasPermission;
 use App\Http\Middleware\EnsureUserHasRole;
-use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SetLocale;
 use App\Support\Locale;
@@ -27,11 +26,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/webhooks/yallapay',
         ]);
 
-        $middleware->encryptCookies(except: ['appearance', 'sidebar_state', Locale::COOKIE]);
+        $middleware->encryptCookies(except: ['sidebar_state', Locale::COOKIE]);
 
         $middleware->web(append: [
             SetLocale::class,
-            HandleAppearance::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);
